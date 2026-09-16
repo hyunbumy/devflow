@@ -6,5 +6,7 @@
 //! itself.
 
 pub mod state;
+pub mod store;
 
 pub use state::{ExecutorState, NodeState, NodeStatus, Phase, State};
+pub use store::{Error, StateStore};
