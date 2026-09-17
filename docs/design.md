@@ -4,8 +4,8 @@ A two-role agent architecture for taking a request from intent to landed code, w
 durable state, explicit human gates, and parallel execution of independent work.
 
 Status: **design, not implemented.** This document defines the architecture and the
-contracts between components. Implementation form (Claude Code skill + subagents vs.
-a standalone harness) is deliberately deferred; see [Open Questions](#12-open-questions).
+contracts between components. How those components are built on Claude Code is in
+[`harness.md`](./harness.md); what remains undecided is in [Open Questions](#12-open-questions).
 
 ---
 
@@ -53,17 +53,22 @@ refreshes them to load changes the human has landed (§8.3).
 
 ### Executor
 
-One per work node. Ephemeral, headless, no channel to the human. Spawned by the
-Orchestrator with the node's work item; works in its own copy of exactly one codebase (§8.1).
+One per work node. Ephemeral, headless, no channel to the human. The Orchestrator spawns it
+as a subagent and hands it the node's work item, which names its scratch directory — the
+work item plus a clone of exactly one codebase (§8.1). How it is built, and how far its
+confinement goes, is in [`harness.md`](./harness.md).
 
-Owns: the implementation of exactly one node, its tests, and its self-review.
+Owns: the implementation of exactly one node, and driving it through test and review. It
+writes the code itself; for the test and review stages it starts a fresh **tester** and a
+fresh **reviewer**, so tests are not self-reported and review is not self-review (§6).
 
 **Does not commit, re-plan, or touch other nodes.** Its changes stay uncommitted in its
 copy for the human to review and land. An Executor that concludes its work item is wrong
 escalates to the Orchestrator rather than improvising a better plan.
 
 Its only message to the Orchestrator is its completion status — ready for confirm, or
-blocked (§7.1). It has no other channel and writes no artifact outside its clone.
+blocked (§7.1). It has no other channel and writes no artifact outside its scratch
+directory.
 
 ### Human
 
@@ -84,12 +89,13 @@ below follows from them.
 
 - **I1.** The Orchestrator never edits production code.
 - **I2.** Exactly one writer per file. `state.json` and `work_item.md` are
-  Orchestrator-only; an Executor writes only inside its own clone. No locking is required
+  Orchestrator-only; an Executor writes only inside its own scratch directory. No locking is required
   because no file has two writers.
 - **I3.** No phase advances without explicit human approval. The phase itself is the
   record: the Orchestrator never moves on from a gate it has not been told to pass.
-- **I4.** An Executor owns exactly one node and one Executor directory, and edits nothing
-  outside it.
+- **I4.** An Executor owns exactly one node and one scratch directory, and edits nothing
+  outside it. For the MVP this is held by instruction, not enforced by the harness; stronger
+  isolation is available when needed (harness.md §4, §7).
 - **I5.** State is durable *before* the action it authorizes (write-ahead). A crash
   between "wrote intent to spawn" and "spawned" is recoverable; the reverse is not.
 - **I6.** An Executor that finds its work item wrong escalates. Re-planning is an
@@ -285,19 +291,42 @@ sequenceDiagram
 
 ### 5.1 Node contract
 
-Each node declares:
+The graph lives in `graph.json` at the project root: a `version`, starting at 1 and bumped
+by each approved amendment (§11), and a list of nodes. Each node declares:
 
 | Field | Purpose |
 |---|---|
-| `id` | Stable identifier; also the Executor directory name |
+| `id` | Lowercase letters, digits and hyphens. Stable for the run, never reused even after `abandoned`; also the Executor directory name |
 | `repo` | The one codebase this node changes |
 | `title` | One line, imperative |
 | `intent` | What changes and why, in prose. The core of the Executor's work item. |
 | `depends_on` | Node ids that must be landed and refreshed before this one starts |
 | `files_touched` | Predicted paths/globs within `repo`. Used for sibling scheduling (§8.2), not enforcement. |
 | `acceptance` | Verifiable criteria. "The endpoint returns 409 on duplicate email", not "auth works". |
-| `tests` | What tests this node must add or change, and how to run them |
+| `tests` | How to verify the node: which tests or suites are relevant and how to run them, as guidance in prose. The tester chooses the exact commands. What tests to *write* follows from `acceptance`, and is the Executor's call |
 | `gate` | `manual` (default) or `auto` — see §12 |
+
+```jsonc
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "n3",
+      "repo": "api",
+      "title": "Extract token verification into AuthVerifier",
+      "intent": "Token verification is inlined in three middleware functions with drifting behavior. Extract a single AuthVerifier class in src/auth/verifier.ts and have all three call it. No behavior change intended.",
+      "depends_on": ["n1"],
+      "files_touched": ["src/auth/verifier.ts", "src/auth/middleware/*.ts"],
+      "acceptance": [
+        "All three middleware paths call AuthVerifier.verify()",
+        "An expired token yields 401 with code TOKEN_EXPIRED on all three paths"
+      ],
+      "tests": "The auth tests are the relevant ones (npm test -- src/auth). Run the full middleware suite too, since all three middleware paths change.",
+      "gate": "manual"
+    }
+  ]
+}
+```
 
 ### 5.2 Sizing rules
 
@@ -319,7 +348,9 @@ mentally sort the diff into categories, split it. This is the same heuristic
 
 ### 5.3 Graph rules
 
-- Acyclic, validated at plan approval.
+- **Validated at plan approval.** The plan is rejected if the dependencies contain a cycle,
+  a dependency names an unknown id, an id is duplicated, a `repo` is not a directory in
+  `.devflow/repos/`, or a node has no acceptance criteria.
 - `depends_on` means "must be **landed and refreshed** into the Orchestrator's copy
   before this starts", not "must be complete". The distinction matters: a dependent
   node's codebase is cloned from that refreshed copy, so it already contains its
@@ -341,33 +372,61 @@ stateDiagram-v2
     complete --> [*]
 ```
 
+The Executor does the implementation itself. The test and review stages are each performed
+by an agent the Executor starts fresh for that stage, and which cannot change the code:
+
+| Stage | Performed by | Can change code |
+|---|---|---|
+| implementation | the Executor | yes |
+| test | a new **tester** | no — instructed not to |
+| review | a new **reviewer** | no — has no tool that can |
+
 The diagram shows the path to completion. Off that path:
 
 | From | Back to `implementation` when | Budget | When exhausted |
 |---|---|---|---|
 | test | tests fail | 3 | `blocked` |
-| review | self-review has findings | 2 | `blocked` |
+| review | the reviewer has findings | 2 | `blocked` |
 | confirm | the human requests revisions | none | — |
+
+**Every return to `implementation` means testing and reviewing again.** An edit invalidates
+the tested diff, so no stage can be skipped on the way back to confirm.
 
 An Executor also ends `blocked` if it finds its work item wrong (I6), and `abandoned` if
 the human rejects the node outright at confirm.
 
 ### implementation
-Make the change described by the work item, plus the tests that verify it. Scope is the node
-and nothing else — discoveries outside it are reported, not fixed (`implementation.md` §1).
+The Executor makes the change described by the work item, plus the tests that verify it.
+Scope is the node and nothing else — discoveries outside it are reported, not fixed
+(`implementation.md` §1). On later rounds it works from the test failure, the review
+findings, or the human's feedback that sent it back.
 
 ### test
-Run the node's tests plus any broader suite reasonably affected. All must pass. A failing
-test is investigated, never disabled or weakened.
+The Executor starts a new tester, giving it the node's `tests` guidance and, from the second
+round on, the commands the previous tester ran. The tester decides what to run — at least what
+the previous round covered — then:
+
+1. hashes the clone's diff;
+2. runs its chosen tests;
+3. hashes the diff again, and reports pass or fail with **the exact commands it ran**, their
+   output, and the hash.
+
+A second hash that differs from the first means the tests changed the tree, which is itself a
+failure. The tester changes nothing. Listing the commands keeps its freedom accountable: "tests
+passed" always says what was run. A failing test is investigated and fixed by the Executor,
+never disabled or weakened.
 
 ### review
-Self-review the full diff against correctness, scope discipline, readability, test quality,
-leftovers, and consistency (`implementation.md` §4). Findings are fixed within scope;
+The Executor starts a new reviewer, which has no tool that can change files. It reviews the
+full diff against correctness, scope discipline, readability, test quality, leftovers, and
+consistency (`implementation.md` §4), and reports findings. On later rounds it is also given
+the earlier findings, to check they were addressed. The Executor fixes findings within scope;
 findings that require leaving scope are escalated.
 
 ### confirm
-The Executor **stops** and messages the Orchestrator that it is done. It cannot reach the
-human itself — the Orchestrator relays (§7). On revision feedback it re-enters `implementation` with that
+The Executor **stops** and reports that it is done, carrying the tester's result and diff
+hash and the reviewer's result. It cannot reach the human itself — the Orchestrator relays
+(§7). On revision feedback it re-enters `implementation` with that
 feedback, as many times as the human wants; on outright rejection the node is `abandoned`
 and the Orchestrator escalates to re-planning.
 
@@ -404,26 +463,28 @@ sequenceDiagram
     end
 ```
 
-**How the Executor signals.** It messages the Orchestrator with its completion status:
-the outcome (`confirm` or `blocked`) and a **completion note** — a few lines covering the
-tests it ran and their result, plus anything the human must know to review the diff. That
-is the Executor's only channel and its only output besides the code in its clone. It writes
-no durable artifact of its own.
+**How the Executor signals.** It finishes, and its final message reports its completion status: the outcome
+(`confirm` or `blocked`) and a **completion note** — a few lines covering the tester's result
+and the diff hash it recorded, the reviewer's result, and anything the human must know to
+review the diff. That is the Executor's
+only channel and its only output besides the code in its clone. It writes no durable artifact
+of its own. Mechanics: harness.md §3.
 
 The Orchestrator records `executor: done` in `state.json`, then presents the diff and the
 note to the human. The diff is read from the clone, so the Orchestrator's context is not
 spent on implementation detail (§2). The note itself is not persisted — after a restart the
 diff is re-presented without it (§10).
 
-Messages are for completion status only — no progress updates while working. So the
+Nothing is reported while working — completion is the only signal. So the
 Orchestrator cannot see inside a running Executor, which is why it tracks only `working` or
 `done` rather than the Executor's internal phases (§6). It also means a crash loses nothing
 that has to be recovered: a respawned Executor reads its clone and picks up from the code
 as it stands (§10).
 
-On revision the Executor is resumed in place, retaining its context. Restarting it from
-cold would discard everything it learned implementing the node — the reason the relay
-resumes rather than respawns.
+On revision the Executor is resumed with a message and keeps its context: it remembers work
+that appears nowhere on disk. Restarting it from cold would discard everything it learned
+implementing the node, which is why the relay resumes rather than respawns. The tester and
+reviewer, by contrast, are always started fresh — they hold nothing worth keeping.
 
 While `n5` awaits confirm, the Orchestrator **keeps scheduling other ready nodes** up to
 the concurrency limit. Human review time overlaps with machine work rather than blocking
@@ -439,6 +500,12 @@ a lock on code they have not seen.
 The human reviews a specific diff: the codebase clone's working tree against the base
 commit it was cloned at, including untracked files. Taking it against the base commit
 rather than the clone's HEAD means the human committing the changes does not alter it.
+
+**Before presenting it, the Orchestrator hashes that diff and compares it to the hash the
+tester recorded.** A mismatch means the code changed after it was tested — and, since review
+comes after testing, possibly after it was reviewed too. The node goes back to the Executor
+without reaching the human. One check therefore guarantees that what the human sees is what
+was tested and what was reviewed.
 
 **The human lands the changes before approving** (§8.3). An approval therefore means both
 "this diff is accepted" and "this diff has landed" — there is no separate state for
@@ -456,7 +523,7 @@ through the graph.
 ### 8.1 Codebase copies
 
 The Orchestrator reads from its own copy of each codebase at `.devflow/repos/<repo>/`.
-Each node gets an Executor directory holding its work item and a clone of the node's one
+Each node gets a scratch directory holding its work item and a clone of the node's one
 codebase:
 
 ```
@@ -464,10 +531,14 @@ codebase:
 ├── repos/
 │   └── <repo>/            # Orchestrator's read-only copy
 └── executors/
-    └── <node-id>/
+    └── <node-id>/         # the Executor's scratch directory
         ├── work_item.md
         └── <repo>/        # clone of repos/<repo> at dispatch
 ```
+
+The work item sits beside the clone rather than inside it, so it stays out of the diff under
+review. The Executor is told the scratch directory's path and to stay inside it; for the MVP
+nothing enforces that (harness.md §4).
 
 The clone is taken from the Orchestrator's copy **at dispatch time**. Because dependencies
 are landed and refreshed before dependents dispatch, a dependent's clone already contains
@@ -478,9 +549,8 @@ repository's `.git` on creation and on every commit made in it, which would brea
 read-only copy (I8). A local clone on the same filesystem hardlinks the object store, so
 it is nearly as cheap and never writes to the source.
 
-The work item sits *beside* the clone, not inside it, so it never appears as an untracked
-file in the diff under review. A node has one Executor at a time; an Executor respawned
-after a crash reuses the directory and its partial work (§10).
+A node has one Executor at a time; an Executor resumed or respawned after a crash reuses the
+directory and its partial work (§10).
 
 Separate clones buy three things: concurrent edits without corruption, independent test
 runs (no shared build lock or port collision), and a clean per-node diff for review.
@@ -547,12 +617,48 @@ in `.devflow/`, which is never checked in.
     ├── repos/
     │   └── <repo>/             # Orchestrator's read-only codebase copy
     └── executors/
-        └── <node-id>/
+        └── <node-id>/          # one Executor's scratch directory
             ├── work_item.md    # the node contract handed to the Executor  (Orchestrator-owned)
             └── <repo>/         # the Executor's codebase clone
 ```
 
-Schemas for `graph.json` and `state.json`: [`state-schema.md`](./state-schema.md).
+### `state.json`
+
+The run's phase and each node's status — nothing else. It is written only by the
+Orchestrator (I2).
+
+```jsonc
+{
+  "phase": "executing",
+  "nodes": {
+    "n1": { "status": "complete", "executor": null },
+    "n3": { "status": "running",  "executor": "done" },
+    "n5": { "status": "running",  "executor": "working" },
+    "n9": { "status": "pending",  "executor": null }
+  }
+}
+```
+
+**`phase`** is one of `intake`, `exploring`, `designing`, `planning`, `executing`, `done`
+(§4). **`nodes`** is keyed by the ids in `graph.json` and filled in when the plan is approved.
+
+| Status | Meaning |
+|---|---|
+| `pending` | Some dependency has not landed |
+| `ready` | Dependencies landed; waiting for a free slot or a disjoint-file window (§8.2) |
+| `running` | An Executor owns the node |
+| `complete` | Landed, approved, and refreshed into the Orchestrator's copy (§8.3) |
+| `blocked` | A budget ran out or the Executor escalated; dependents are blocked too |
+| `abandoned` | The human rejected the node; needs a graph amendment |
+
+**`executor`** is `working` or `done` while the node is `running`, and `null` otherwise. It
+records the only two things the Orchestrator can observe of an Executor: that it has not
+reported yet, or that it has. `done` means the node is waiting on the human, so it frees its
+concurrency slot. The Executor's internal stage is not recorded.
+
+**Not stored:** paths, which the layout fixes — a node's scratch directory is always
+`.devflow/executors/<id>/` and its clone is `<repo>/` inside it; which Executor is working which
+node, since that dies with the session (§10); and the completion note, for the same reason.
 
 **Initialization.** The human creates the project repository and populates
 `.devflow/repos/` with every codebase the project needs — directly, or from a list of
@@ -590,15 +696,29 @@ Recovery protocol, per node:
 | Recorded state | Action |
 |---|---|
 | `pending`, `ready` | Nothing was in flight. Schedule normally. |
-| `running`, executor `working` | Respawn an Executor in the same directory with the work item, plus the human's feedback if it was mid-revision. |
-| `running`, executor `done` | Re-present the clone's current diff. If the human had already landed it before the crash, they say so and the Orchestrator continues with §8.3. |
+| `running`, executor `working` | Spawn a fresh Executor with the same work item, plus the human's feedback if it was mid-revision. It reads the clone to see how far the work got; the previous Executor's reasoning is lost, its output is not. |
+| `running`, executor `done` | The completion note and its diff hash died with the session, so the diff cannot be shown with its guarantee. Start a fresh Executor told the implementation is finished: it goes straight to test and review, then confirms. If the human had already landed and approved before the crash, they say so and the Orchestrator continues with §8.3 instead. |
 | `complete` | Remove the clone if it is still there. |
 | `blocked`, `abandoned` | Surface to the human; do not auto-retry. |
 
-Writes to `state.json` are atomic (write to a temp file, `fsync`, `rename`). Combined with
-write-ahead ordering (I5), a crash at any point leaves state that is either correct or
-conservatively stale — never ahead of reality. Stale is cheap here: the worst case is an
-Executor re-doing work that is already sitting in its clone.
+**State is written before the action it authorizes** (I5):
+
+- a phase advances before the next phase's work begins;
+- a node is marked `running`, Executor `working`, before its Executor is started;
+- Executor `done` is written before the diff is presented, and `working` before revision
+  feedback is sent;
+- `blocked` and `abandoned` are written before anything else is done about them;
+- `complete` is written only after the refresh succeeds, and the clone is removed only after
+  that.
+
+So a crash leaves state that is either correct or conservatively stale — never ahead of
+reality. Stale is cheap here: the worst case is an Executor re-doing work already sitting in
+its clone.
+
+**Writes are not atomic.** The Orchestrator rewrites the whole file with its ordinary file
+tools, so a crash mid-write could leave it malformed. If `state.json` does not parse, the
+Orchestrator stops and asks the human: `graph.json` and the scratch directories on disk are
+enough to rebuild it by hand.
 
 ---
 
@@ -626,9 +746,14 @@ Surfaced to the human; the Orchestrator does not reset or merge its copy (I8).
 
 ## 12. Open Questions
 
-1. **Implementation form.** Claude Code skill + subagents (cheap, works today, constrained
-   by what the Agent tool exposes) vs. a standalone harness on the Agent SDK (full control
-   over scheduling, resume, and approval UX; a runtime to maintain). Deferred.
+1. **Isolation of a running Executor.** The MVP's Executors are subagents confined only by
+   their instructions. An Executor that escapes could damage another node's clone, the
+   Orchestrator's read-only copies, or the project — accepted as a known risk for the MVP, to
+   be addressed if it happens. Three stronger options are described in
+   harness.md §7: a hook on file-writing tools (partial — the shell bypasses it), a separate
+   process rooted at the scratch directory (confines tool calls, but not processes started by
+   allowed commands), and that process inside an operating-system sandbox (complete, at the cost
+   of a per-toolchain binding list).
 
 2. **`gate: auto` nodes.** The node contract reserves the field but this design treats
    every node as `manual`. Auto-gating low-risk nodes (config, mechanical renames) on
@@ -649,9 +774,11 @@ Surfaced to the human; the Orchestrator does not reset or merge its copy (I8).
 5. **Execution state is machine-local** (§9). The artifacts are checked in, but
    `.devflow/` is not, so a run cannot resume execution from a different checkout.
 
-6. **Nested orchestration** — whether an Executor may ever spawn sub-Executors — is
-   deliberately excluded. It breaks I4 and makes the state machine substantially harder
-   to reason about. Revisit only with evidence of need.
+6. **Nested orchestration** — whether an Executor may ever spawn sub-Executors to split its
+   work — is deliberately excluded. It breaks I4 and makes the state machine substantially
+   harder to reason about. Revisit only with evidence of need. This is distinct from the
+   tester and reviewer an Executor starts (§6): those perform fixed stages of one node's
+   loop and change no code.
 
 7. **Human-owned git (I7) is a starting policy.** It keeps agents out of history but puts
    commits, landing, and conflict resolution on the human's hot path. Open: whether to
@@ -670,3 +797,11 @@ Surfaced to the human; the Orchestrator does not reset or merge its copy (I8).
 10. **Turning a design into a good graph is under-specified.** §5.2 gives sizing rules, but
    nothing guides decomposition itself, and the plan's quality determines everything
    downstream. Iterate on this after the MVP, with real graphs to learn from.
+
+11. **Deterministic operations are done by instruction.** The MVP has no code of its own:
+   graph validation, working out which nodes are ready, cloning, the landing sequence, and
+   writes to `state.json` are all performed by the Orchestrator following its skill
+   (harness.md §6). That is reliable for a handful of nodes and plainly worded steps, and
+   unreliable for large graphs or long sequences. When a specific operation goes wrong in
+   practice, move that operation into code — a command-line program, or an MCP server that
+   would also let tools be withheld from Executors — rather than all of them at once.
