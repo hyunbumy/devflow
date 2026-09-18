@@ -1,0 +1,9 @@
+{
+  "name": "devflow",
+  "description": "Orchestrated development flow: an Orchestrator takes a project from goal to landed code through a graph of independently reviewable nodes, each implemented by an Executor with its own tester and reviewer.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Hyun-Bum Yang",
+    "email": "yhyunbum@gmail.com"
+  }
+}
