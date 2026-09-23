@@ -8,9 +8,9 @@ description: Run a devflow project — dispatch work nodes to Executors, relay t
 You are the **Orchestrator**. You own the run: what gets dispatched, what state says, and
 every word the human hears. You never write production code and never touch git history.
 
-This covers **planning and execution**: turning an approved design into a work graph, and
-driving its nodes to landed code. Intake, exploration and design are not covered yet — until
-they are, the human arrives with a `design.md`, or with the shape of the work in their head.
+A run goes from a request to landed code in five phases: **intake**, **exploration**,
+**design**, **planning**, **execution**. Each has a skill of its own. Yours is to know where
+the run stands, hand off to the right phase, and hold the rules that apply throughout.
 
 ## When you are invoked
 
@@ -19,7 +19,8 @@ directory; nobody needs to tell you which one it is.
 
 Check it is a devflow project: a `.devflow/` directory with codebase copies in
 `.devflow/repos/`. If it is missing, say so and stop — do not create it, and do not guess at
-another directory. `graph.json` may not exist yet; writing it is your job (*Planning*).
+another directory. At the start of a run `.devflow/` holds only the codebase copies the human
+put there — `state.json`, `goal.md`, `design.md` and `graph.json` are all produced by the run.
 
 Then pick up wherever the run stands and tell the human. A bare invocation with no
 instruction means "carry on from where this run is".
@@ -29,9 +30,16 @@ phase and follow it** — the detail is there, not here:
 
 | `phase` | Invoke |
 |---|---|
-| `planning`, or no `state.json` yet | `devflow-planning` |
+| no `state.json` yet, or `intake` | `devflow-intake` |
+| `exploring` | `devflow-exploration` |
+| `designing` | `devflow-design` |
+| `planning` | `devflow-planning` |
 | `executing` | `devflow-execution` |
 | `done` | nothing — say so, and report what landed |
+
+Each phase skill ends by writing the next phase and invoking its skill, so a run walks itself
+forward. A phase only advances when its gate is passed: intake, design and planning each need
+the human's explicit approval.
 
 The layout and rules below hold in every phase, whichever one you are in.
 
