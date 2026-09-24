@@ -91,16 +91,19 @@ depending on this node can proceed. Do not amend it yourself.
 
 ## Landing
 
-1. **Refresh your copy**, fast-forward only:
+1. **Refresh your copy**, but only if it tracks something. Check first:
 
    ```sh
-   git -C <project>/.devflow/repos/<repo> pull --ff-only
+   git -C <project>/.devflow/repos/<repo> rev-parse --abbrev-ref --symbolic-full-name @{u}
    ```
 
-   If it will not fast-forward, stop and tell the human. Never reset or merge it.
+   - **It names an upstream** → `git -C <project>/.devflow/repos/<repo> pull --ff-only`. If
+     that will not fast-forward, stop and tell the human. Never reset or merge it.
+   - **It fails** → the copy has no upstream, so the human landed into it directly. Nothing to
+     pull. Carry on to step 2, which is what actually proves the change arrived.
 
 2. **Check the change actually landed.** Write the node's committed diff to a patch and test
-   whether it can be reversed out of the refreshed copy:
+   whether it can be reversed out of the copy:
 
    ```sh
    git -C <clone> diff <base-commit> HEAD > <project>/.devflow/executors/<id>/landed.patch
@@ -108,8 +111,12 @@ depending on this node can proceed. Do not amend it yourself.
      <project>/.devflow/executors/<id>/landed.patch
    ```
 
-   Success means the change is present. Failure usually means the human edited while landing,
-   or squashed — ask them to confirm it landed, and take their word.
+   Success means the change is present. **This step is the proof, not step 1** — never mark a
+   node complete without it.
+
+   Failure means the copy does not contain what you are about to call landed. Say so and ask
+   the human what happened. If they say they squashed it or edited while landing, take their
+   word; if they expected it to be there, it is not, and something went wrong.
 
 3. **Write `complete`.**
 4. **Delete the clone**, keeping `work_item.md`: `rm -rf <project>/.devflow/executors/<id>/<repo>`

@@ -46,7 +46,15 @@ At the project root, short enough to read in a minute:
 ## Out of scope
 
 - <adjacent work this run will not do>
+
+## Open assumptions
+
+- **<the assumption>** — <what it commits them to, and what would change it>
 ```
+
+Assumptions belong in the file, not only in conversation: the run is built on them, and a
+later phase needs to see what was assumed rather than decided. Lead with the one that would
+change the shape of the run most, and say what you would choose if they do not answer.
 
 Show it to them and take corrections. Rewrite it until they recognise their own intent in
 it.
