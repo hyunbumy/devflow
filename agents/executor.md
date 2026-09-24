@@ -42,11 +42,12 @@ Start a `devflow:tester` subagent. Give it:
 - the exact commands the previous tester ran, if this is not the first round. It must run at
   least those.
 
-It returns pass or fail, the commands it ran, their output, and a diff hash.
+It returns pass or fail, the commands it ran, and their output.
 
 - **Fail** → back to step 1. After **3** failures, stop as `blocked`.
-- **The two hashes differ** → the tests changed the tree. Treat as a failure.
-- **Pass** → keep the diff hash. It goes in your completion report.
+- **The run dirtied the tree** → treat as a failure. Either the tests write into the tree, or
+  the project does not ignore its own artifacts. Report it; do not paper over it.
+- **Pass** → note the commands it ran. They go in your completion report.
 
 ### 3. Review
 
@@ -80,7 +81,6 @@ of it.
 ```
 outcome: confirm | blocked
 node: <node id>
-diff hash: <hash from the passing test run, or "none">
 tests: <commands the tester ran> — <pass/fail, key numbers>
 review: <clean, or why you stopped>
 notes: <anything the human needs in order to review, or "none">

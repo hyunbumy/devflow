@@ -406,13 +406,13 @@ The Executor starts a new tester, giving it the node's `tests` guidance and, fro
 round on, the commands the previous tester ran. The tester decides what to run — at least what
 the previous round covered — then:
 
-1. hashes the clone's diff;
-2. runs its chosen tests;
-3. hashes the diff again, and reports pass or fail with **the exact commands it ran**, their
-   output, and the hash.
+1. runs its chosen tests;
+2. reports pass or fail with **the exact commands it ran** and their output, and says whether
+   the run left the tree dirty.
 
-A second hash that differs from the first means the tests changed the tree, which is itself a
-failure. The tester changes nothing. Listing the commands keeps its freedom accountable: "tests
+A run that writes into the tree it is measuring — build artifacts, caches, output files — is
+itself a failure: the result cannot be trusted, and the project needs to ignore its artifacts
+before the node can be verified. The tester changes nothing. Listing the commands keeps its freedom accountable: "tests
 passed" always says what was run. A failing test is investigated and fixed by the Executor,
 never disabled or weakened.
 
@@ -424,8 +424,8 @@ the earlier findings, to check they were addressed. The Executor fixes findings 
 findings that require leaving scope are escalated.
 
 ### confirm
-The Executor **stops** and reports that it is done, carrying the tester's result and diff
-hash and the reviewer's result. It cannot reach the human itself — the Orchestrator relays
+The Executor **stops** and reports that it is done, carrying the tester's result
+and the reviewer's result. It cannot reach the human itself — the Orchestrator relays
 (§7). On revision feedback it re-enters `implementation` with that
 feedback, as many times as the human wants; on outright rejection the node is `abandoned`
 and the Orchestrator escalates to re-planning.
@@ -464,8 +464,8 @@ sequenceDiagram
 ```
 
 **How the Executor signals.** It finishes, and its final message reports its completion status: the outcome
-(`confirm` or `blocked`) and a **completion note** — a few lines covering the tester's result
-and the diff hash it recorded, the reviewer's result, and anything the human must know to
+(`confirm` or `blocked`) and a **completion note** — a few lines covering the commands the
+tester ran and their result, the reviewer's result, and anything the human must know to
 review the diff. That is the Executor's
 only channel and its only output besides the code in its clone. It writes no durable artifact
 of its own. Mechanics: harness.md §3.
@@ -501,11 +501,11 @@ The human reviews a specific diff: the codebase clone's working tree against the
 commit it was cloned at, including untracked files. Taking it against the base commit
 rather than the clone's HEAD means the human committing the changes does not alter it.
 
-**Before presenting it, the Orchestrator hashes that diff and compares it to the hash the
-tester recorded.** A mismatch means the code changed after it was tested — and, since review
-comes after testing, possibly after it was reviewed too. The node goes back to the Executor
-without reaching the human. One check therefore guarantees that what the human sees is what
-was tested and what was reviewed.
+**Nothing mechanically proves that this diff is the one that was tested and reviewed.** The
+loop holds because the Executor is told to follow it, and because the completion note says
+what the tester ran. An earlier draft bound the two with a content hash of the diff; it was
+removed after it misfired on generated files (§12, item 11). Until something replaces it, the
+Orchestrator reads the completion note and sends back anything that does not add up.
 
 **The human lands the changes before approving** (§8.3). An approval therefore means both
 "this diff is accepted" and "this diff has landed" — there is no separate state for
@@ -697,7 +697,7 @@ Recovery protocol, per node:
 |---|---|
 | `pending`, `ready` | Nothing was in flight. Schedule normally. |
 | `running`, executor `working` | Spawn a fresh Executor with the same work item, plus the human's feedback if it was mid-revision. It reads the clone to see how far the work got; the previous Executor's reasoning is lost, its output is not. |
-| `running`, executor `done` | The completion note and its diff hash died with the session, so the diff cannot be shown with its guarantee. Start a fresh Executor told the implementation is finished: it goes straight to test and review, then confirms. If the human had already landed and approved before the crash, they say so and the Orchestrator continues with §8.3 instead. |
+| `running`, executor `done` | The completion note died with the session, so nothing records what was tested. Start a fresh Executor told the implementation is finished: it goes straight to test and review, then confirms. If the human had already landed and approved before the crash, they say so and the Orchestrator continues with §8.3 instead. |
 | `complete` | Remove the clone if it is still there. |
 | `blocked`, `abandoned` | Surface to the human; do not auto-retry. |
 
@@ -798,7 +798,18 @@ Surfaced to the human; the Orchestrator does not reset or merge its copy (I8).
    nothing guides decomposition itself, and the plan's quality determines everything
    downstream. Iterate on this after the MVP, with real graphs to learn from.
 
-11. **Deterministic operations are done by instruction.** The MVP has no code of its own:
+11. **Nothing binds the reviewed diff to the tested diff.** The design carried a content hash
+   for this: the tester hashed the clone's diff before and after running, the hash travelled in
+   the completion note, and the Orchestrator recomputed it before showing the human — one check
+   covering both "these tests ran on this code" and "nobody edited after review". It was removed
+   after a real run showed it misfiring: Python bytecode embeds the source timestamp, so a
+   `.pyc` regenerated by the test run changed the hash with nothing tampered, and the node was
+   bounced for it. Excluding generated files needs a general rule for what counts as generated,
+   which is the hard part. For now the loop is held by instruction. Restore a hash — over
+   tracked changes only, or over a tree cleaned to a declared ignore list — when the guarantee
+   matters more than the false positives.
+
+12. **Deterministic operations are done by instruction.** The MVP has no code of its own:
    graph validation, working out which nodes are ready, cloning, the landing sequence, and
    writes to `state.json` are all performed by the Orchestrator following its skill
    (harness.md §6). That is reliable for a handful of nodes and plainly worded steps, and

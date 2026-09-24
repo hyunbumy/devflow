@@ -17,7 +17,7 @@ agent definitions, a skill, and templates — plus `git` and `sha256sum`.
 |---|---|---|---|
 | Orchestrator | The human's interactive session, in the project directory, following the `devflow` skill | All | The run: goal, design, graph, scheduling, state, confirm relay, landing |
 | Executor | A subagent, one per node | Read, Edit, Write, Bash, Agent | Implement the node; start a tester and a reviewer for those stages |
-| Tester | A subagent of the Executor, new for every test stage | Read, Bash | Hash the diff, run the tests, hash again, report |
+| Tester | A subagent of the Executor, new for every test stage | Read, Bash | Run the tests, report what ran and what happened |
 | Reviewer | A subagent of the Executor, new for every review stage | Read, Grep, Glob | Review the diff, report findings |
 
 **Tool lists are enforced by Claude Code.** An agent cannot call a tool its definition does not
@@ -79,36 +79,23 @@ which recovery handles (§5).
 **The loop** — the Executor:
 
 1. **Implementation.** Make the change and its tests.
-2. **Test.** Start a new tester with the clone path, base commit, the node's `tests` guidance,
-   and the commands the previous tester ran, if any. It chooses what to run — at least what was
-   run before — and returns pass or fail, the exact commands, their output, and the diff hash.
-   Fail → back to 1. Third failure → `blocked`.
-3. **Review.** Start a new reviewer with the clone path, base commit, and any earlier findings.
-   It returns findings or none. Findings → back to 1, which means testing again. Second round
-   with findings → `blocked`.
-4. **Confirm.** Finish, with a completion note from its template: outcome, the tester's result
-   and diff hash, the reviewer's result, and anything the human needs.
+2. **Test.** Start a new tester with the clone path, the node's `tests` guidance, and the
+   commands the previous tester ran, if any. It chooses what to run — at least what was run
+   before — and returns pass or fail, the exact commands, their output, and whether the run
+   left the tree dirty. Fail → back to 1. Third failure → `blocked`.
+3. **Review.** Start a new reviewer with the clone path, the diff, the node's acceptance
+   criteria, and any earlier findings. Findings → back to 1, which means testing again.
+   Second round with findings → `blocked`.
+4. **Confirm.** Finish, with a completion note: outcome, the commands the tester ran and their
+   result, the reviewer's result, and anything the human needs.
 
-**The diff hash** is computed the same way by the tester and later by the Orchestrator, so the
-two can be compared:
+**Completion** — the Orchestrator, when the Executor's final message arrives: record Executor
+`done`, then present the diff and the completion note to the human.
 
-```sh
-cd <clone> && {
-  git diff <base-commit>
-  git ls-files --others --exclude-standard | sort | while read -r f; do
-    printf '%s\n' "$f"; cat "$f"
-  done
-} | sha256sum
-```
-
-That covers tracked changes against the base commit and the names and contents of new files.
-
-**Completion** — the Orchestrator, when the Executor's final message arrives:
-
-1. Record Executor `done`.
-2. Compute the diff hash itself. If it differs from the tester's, the code changed after testing:
-   resume the Executor with that fact instead of showing the human anything.
-3. Otherwise present the diff and the completion note to the human.
+Nothing mechanically proves the diff is the one that was tested and reviewed. An earlier draft
+hashed the diff for exactly that, and it was removed after generated files made it misfire
+(design.md §12, item 11). The Orchestrator reads the completion note instead, and sends a node
+back when the tests it names do not match what the node needed.
 
 **Revision.** The Orchestrator records Executor `working` and sends the human's feedback to the
 same Executor as a message. It resumes with its context intact and goes round the loop again,
@@ -153,10 +140,10 @@ permission configuration is needed.
 - **Executor `working`:** start a fresh Executor with the same work item. It reads the clone to
   see how far the previous one got and continues. The previous Executor's reasoning is lost;
   its output, being on disk, is not.
-- **Executor `done`:** the completion note, and the tester's diff hash in it, died with the
-  session, so the diff cannot be presented with its guarantee. Start a fresh Executor told the
-  implementation is finished; it goes straight to test and review, then confirms. If the human
-  had already landed and approved before the crash, skip to landing.
+- **Executor `done`:** the completion note died with the session, so nothing records what was
+  tested. Start a fresh Executor told the implementation is finished; it goes straight to test
+  and review, then confirms. If the human had already landed and approved before the crash,
+  skip to landing.
 
 ---
 
@@ -166,8 +153,8 @@ permission configuration is needed.
 |---|---|
 | The reviewer cannot change code | Its tool list — **enforced** |
 | Tests are run by an agent other than the implementer | The loop structure — the Executor must start a tester to get a result |
-| What the human sees is what was tested and reviewed | The diff hash check before confirm — performed by the Orchestrator, following its skill |
-| The tester changes nothing | Its instructions; its before-and-after hash makes changes during a test run visible |
+| What the human sees is what was tested and reviewed | **Nothing.** Held by the Executor following its loop; see design.md §12, item 11 |
+| The tester changes nothing | Its instructions; it reports a dirty tree, which makes a run that wrote into it visible |
 | The tester's choice of tests is sound | Its instructions; its report lists the exact commands, and a retest must cover at least the previous round's |
 | The Executor does not skip a stage or invent a report | Its instructions; the completion note must carry both reports' results, which makes a skip visible |
 | Budgets: tests 3, review 2 | The Executor's instructions |
@@ -185,7 +172,7 @@ rather than copying files into its `.claude/`, so every project runs the same ve
 | File | Contents |
 |---|---|
 | `agents/executor.md` | The loop above, the rules, the tool list |
-| `agents/tester.md` | The hash-test-hash procedure and its report format |
+| `agents/tester.md` | How to choose what to run, and its report format |
 | `agents/reviewer.md` | The review checklist — written out in full, since `implementation.md` does not exist inside a project — and its report format |
 | `skills/devflow/SKILL.md` | The Orchestrator's phases and gates, and step-by-step procedures for validating a graph, dispatching, completing, landing, and recovering |
 | Templates | Work item, tester report, reviewer report, completion note |

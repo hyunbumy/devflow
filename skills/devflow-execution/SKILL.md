@@ -56,28 +56,21 @@ Then carry on: dispatch anything else that qualifies, or talk to the human.
 **`blocked`** → write `blocked`, and mark every node that depends on it `blocked` too. Tell
 the human what stopped it and which nodes are now stalled. Do not retry it yourself.
 
-**`confirm`** → check its work before the human sees anything:
+**`confirm`** → present it to the human:
 
-1. Compute the diff hash yourself, exactly as the tester does:
+1. The diff, from `git -C <clone> diff <base-commit>` plus any new untracked files.
+2. The completion note, as the Executor wrote it — the commands the tester ran, their result,
+   and the reviewer's verdict.
+3. What you need from them: review it, land it, then tell you **approved**, **revise** with
+   feedback, or **reject**.
 
-   ```sh
-   cd <clone> && {
-     git diff <base-commit>
-     git ls-files --others --exclude-standard | sort | while read -r f; do
-       printf '%s\n' "$f"; cat "$f"
-     done
-   } | sha256sum
-   ```
+Write executor `done` before you present.
 
-2. **If it differs from the hash in the report**, the code changed after it was tested — and
-   review came after testing, so possibly after it was reviewed. Do not show the human. Send
-   the Executor back: tell it the tree changed after the tested diff and it must run test and
-   review again.
-3. **If it matches**, write executor `done`, and present to the human:
-   - the diff, from `git -C <clone> diff <base-commit>` plus any new untracked files;
-   - the completion note, as the Executor wrote it;
-   - what you need from them: review it, land it, then tell you **approved**, **revise** with
-     feedback, or **reject**.
+Nothing verifies mechanically that the diff you show is the diff that was tested and
+reviewed; that rests on the Executor following its loop, and on the tester reporting the
+commands it actually ran. Read the completion note before relaying it. If the tests it names
+do not match what the node needed, or the reviewer's verdict is missing, send it back rather
+than passing the gap to the human.
 
 ## What the human comes back with
 
