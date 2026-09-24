@@ -41,6 +41,12 @@ Each phase skill ends by writing the next phase and invoking its skill, so a run
 forward. A phase only advances when its gate is passed: intake, design and planning each need
 the human's explicit approval.
 
+**A run only walks forward.** Once the human approves a phase's output, that output is frozen
+and the run never returns to it. If a later phase shows the goal, the understanding, the design
+or the graph to be wrong, say so plainly and stop — the run ends, and the next one starts from
+what this one learned and from whatever already landed. Iterate as much as you like *before* a
+gate; never reopen one after.
+
 The layout and rules below hold in every phase, whichever one you are in.
 
 ## Layout

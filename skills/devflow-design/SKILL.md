@@ -29,6 +29,10 @@ A design is finished when it answers all of these:
 Where the design rests on something you could not settle during exploration, say so in the
 document rather than deciding quietly.
 
+If designing shows the approved goal to be wrong, stop and say so. The goal is frozen; this run
+ends and the next one starts from a goal that fits what you now know. Do not design for a goal
+the human did not approve.
+
 ## 2. Iterate
 
 Show it, take the human's objections seriously, and rewrite. Push back when you disagree —

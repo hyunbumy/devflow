@@ -10,9 +10,13 @@ are in the `devflow` skill, which sends you here; they still apply.
 
 ## On start, or when asked to resume
 
+**You own the statuses while the run is executing** — planning sets them when it hands over,
+and you move them from there. **Never edit `graph.json`.** It was frozen when the human
+approved it; a run that needs a different graph is a run that has to end.
+
 1. Read `graph.json` and `.devflow/state.json`. If `state.json` will not parse, stop and ask
    the human — do not guess it back into shape.
-2. For each node, act on what state says:
+2. Act on what each entry says:
 
    | Recorded | Do |
    |---|---|
@@ -20,7 +24,7 @@ are in the `devflow` skill, which sends you here; they still apply.
    | `running`, executor `working` | That Executor is gone. Start a fresh one with the same work item, telling it the implementation may be partly done and to read the clone first |
    | `running`, executor `done` | Its report died with the session. Start a fresh Executor, telling it the implementation is finished and to go straight to test and review |
    | `complete` | Delete the clone if it is still there |
-   | `blocked`, `abandoned` | Leave it; mention it to the human |
+   | `blocked`, `abandoned` | Leave it; mention it to the human. Nothing in this run revives it |
 
 3. Tell the human where the run stands, then continue.
 
@@ -77,8 +81,9 @@ than passing the gap to the human.
 **revise** → write executor `working`, then send their feedback to that same Executor as a
 message. It keeps its context and goes round its loop again.
 
-**reject** → write `abandoned`. Tell the human the graph needs amending before anything
-depending on this node can proceed. Do not amend it yourself.
+**reject** → write `abandoned`, and mark every node that depends on it `blocked`. Tell the
+human this node and its dependents are finished for this run, and that the work needs a fresh
+run to plan differently. Do not touch the graph.
 
 **approved** → they have already committed and landed the change. Run the landing steps.
 

@@ -8,13 +8,18 @@ description: The planning phase of a devflow run — decompose an approved desig
 Turning a design into an approved work graph. The layout, the state file and the standing
 rules are in the `devflow` skill, which sends you here; they still apply.
 
-You write the graph; the human approves it. Decompose, check your own work, show them what
-it means, and only then start executing. Once a graph is approved, changing it needs their
-approval again (*Amendments*, below).
+You write the graph; the human approves it. Decompose, check your own work, show them what it
+means, and only then start executing.
+
+**The graph is frozen at approval.** Nothing changes it once execution begins — not a blocked
+node, not a rejected one. Get it right here, because here is the only place it can be got
+right. A run that turns out to need a different graph ends, and the next run plans afresh.
+
+The same holds looking backwards: if decomposing shows the approved design to be wrong, stop
+and say so rather than planning around it. The design is frozen too.
 
 `graph.json` is yours to write. If one already exists from an earlier planning session, it is
-a draft of your own: revise it rather than starting over. Once a run is executing, the graph
-is approved and only an amendment changes it.
+a draft of your own: revise it rather than starting over.
 
 ### 1. Decompose the design into nodes
 
@@ -98,22 +103,13 @@ Then tell the human what they are approving: how many nodes, how deep the chain 
 nodes can run together, and any judgement call you made while splitting the work that they
 might disagree with.
 
-### 4. Get approval, then seed state
+### 4. Get approval, then hand over
 
 Only on their explicit approval — not "looks good", an actual yes:
 
-1. Write `state.json`: `phase: "executing"`, and every node listed. A node with no
-   dependencies starts `ready`; every other node starts `pending`.
-2. Say the run is ready, and begin execution.
+1. Write `state.json`: `phase: "executing"`, and an entry for every node in the graph. A node
+   whose dependencies are all `complete` starts `ready`; every other node starts `pending`.
+2. Say the run is ready, and invoke the `devflow-execution` skill.
 
-### Amendments
-
-When a node is abandoned, or an Executor reports its work item is wrong, the graph needs
-changing. Propose the change in words first and get the human's agreement; only then edit
-`graph.json`, bump its `version`, check it again from step 2, and reconcile state:
-
-- nodes already `complete` stay `complete`, and their work stays landed;
-- nodes that no longer exist are dropped from state;
-- new or changed nodes start `pending` or `ready` as above.
-
-An amended graph needs fresh approval, exactly like the first one.
+From here the statuses are execution's: it moves nodes through `running`, `complete`,
+`blocked` and `abandoned` as work happens. You do not touch them again.

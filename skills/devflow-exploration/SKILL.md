@@ -71,6 +71,8 @@ There is no approval gate here: exploration produces knowledge, not a commitment
 open questions are answered and you could defend a design:
 
 1. Summarise for the human what you found — especially anything that contradicts what they
-   assumed at intake.
+   assumed at intake. If the goal itself turns out to be wrong or impossible, say so and stop:
+   the goal is approved and frozen, so the answer is a new run with a better goal, not a quiet
+   rewrite of this one.
 2. Write `phase: "designing"` to `state.json`.
 3. Invoke the `devflow-design` skill.

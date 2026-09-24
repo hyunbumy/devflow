@@ -91,15 +91,17 @@ below follows from them.
 - **I2.** Exactly one writer per file. `state.json` and `work_item.md` are
   Orchestrator-only; an Executor writes only inside its own scratch directory. No locking is required
   because no file has two writers.
-- **I3.** No phase advances without explicit human approval. The phase itself is the
-  record: the Orchestrator never moves on from a gate it has not been told to pass.
+- **I3.** No phase advances without explicit human approval, and no phase is revisited once
+  it has one. The phase itself is the record: the Orchestrator never moves on from a gate it
+  has not been told to pass, and never moves back through one it has.
 - **I4.** An Executor owns exactly one node and one scratch directory, and edits nothing
   outside it. For the MVP this is held by instruction, not enforced by the harness; stronger
   isolation is available when needed (harness.md §4, §7).
 - **I5.** State is durable *before* the action it authorizes (write-ahead). A crash
   between "wrote intent to spawn" and "spawned" is recoverable; the reverse is not.
-- **I6.** An Executor that finds its work item wrong escalates. Re-planning is an
-  Orchestrator action and requires a fresh human approval.
+- **I6.** An Executor that finds its work item wrong escalates rather than improvising a
+  better plan. The graph does not change in response: the node is blocked, and re-planning
+  waits for a new run.
 - **I7.** Only the human writes git history, in the project repository and in every
   codebase. No agent commits, merges, rebases, or pushes.
 - **I8.** The Orchestrator's codebase copies are read-only. They change only by a
@@ -110,8 +112,9 @@ below follows from them.
 ## 4. Run Lifecycle
 
 A **run** is one pass through this lifecycle, from intake to `done`, for one approved
-goal. It has one goal, design, and work graph, and one `state.json`. Re-planning and design revisions (§11) happen *within* a run — they amend it
-rather than start a new one. A project has exactly one run (§12).
+goal. It has one goal, design, and work graph, and one `state.json`. Each phase's output is
+frozen when the human approves it: a run never returns to an earlier phase, and work that turns
+out to need a different plan waits for a new run (§11). A project has exactly one run (§12).
 
 ```mermaid
 stateDiagram-v2
@@ -120,14 +123,15 @@ stateDiagram-v2
     exploring --> designing
     designing --> planning: design approved
     planning --> executing: plan approved
-    executing --> planning: work item wrong
-    executing --> designing: design wrong
-    executing --> done: all nodes landed
+    executing --> done: all nodes landed, or the rest cannot be built
     done --> [*]
 ```
 
 Each gated phase (intake, design, planning) iterates with the human until approval; those
-loops are omitted from the diagram.
+loops are omitted from the diagram. **They are the only loops.** Once a phase's output is
+approved it is frozen, and the run never returns to it: a later phase that finds the goal,
+the understanding, the design or the graph wrong says so and the run ends. Nothing is
+rewritten behind an approval the human already gave.
 
 ### 4.1 Intake
 
@@ -279,7 +283,7 @@ sequenceDiagram
         else reject
             H-->>O: reject
             O->>S: status abandoned
-            O->>H: propose re-plan (§11)
+            O->>H: node abandoned, nothing revives it (§11)
         end
     end
     O->>H: run complete
@@ -291,8 +295,9 @@ sequenceDiagram
 
 ### 5.1 Node contract
 
-The graph lives in `graph.json` at the project root: a `version`, starting at 1 and bumped
-by each approved amendment (§11), and a list of nodes. Each node declares:
+The graph lives in `graph.json` at the project root: a list of nodes, nothing else. There is
+no version field — the human commits the file, so git already records what the graph was and
+when it changed. Each node declares:
 
 | Field | Purpose |
 |---|---|
@@ -308,7 +313,6 @@ by each approved amendment (§11), and a list of nodes. Each node declares:
 
 ```jsonc
 {
-  "version": 1,
   "nodes": [
     {
       "id": "n3",
@@ -428,7 +432,7 @@ The Executor **stops** and reports that it is done, carrying the tester's result
 and the reviewer's result. It cannot reach the human itself — the Orchestrator relays
 (§7). On revision feedback it re-enters `implementation` with that
 feedback, as many times as the human wants; on outright rejection the node is `abandoned`
-and the Orchestrator escalates to re-planning.
+and the Orchestrator records it as finished for this run (§11).
 
 ### complete
 The human landed the changes and approved at confirm (§8.3). The Executor is finished.
@@ -459,7 +463,7 @@ sequenceDiagram
         E5-->>O: done again, ready for confirm
     else reject
         H-->>O: reject n5
-        Note over O,E5: n5 abandoned, re-plan (§11)
+        Note over O,E5: n5 abandoned for this run (§11)
     end
 ```
 
@@ -640,7 +644,10 @@ Orchestrator (I2).
 ```
 
 **`phase`** is one of `intake`, `exploring`, `designing`, `planning`, `executing`, `done`
-(§4). **`nodes`** is keyed by the ids in `graph.json` and filled in when the plan is approved.
+(§4). **`nodes`** is keyed by the ids in `graph.json`. Planning writes the entries when a plan
+is approved; execution moves them through `running`, `complete`, `blocked` and `abandoned`
+while the run proceeds. The two never write at once, because the graph is frozen at approval
+and planning is finished before execution starts.
 
 | Status | Meaning |
 |---|---|
@@ -649,7 +656,7 @@ Orchestrator (I2).
 | `running` | An Executor owns the node |
 | `complete` | Landed, approved, and refreshed into the Orchestrator's copy (§8.3) |
 | `blocked` | A budget ran out or the Executor escalated; dependents are blocked too |
-| `abandoned` | The human rejected the node; needs a graph amendment |
+| `abandoned` | The human rejected the node. Nothing in this run revives it |
 
 **`executor`** is `working` or `done` while the node is `running`, and `null` otherwise. It
 records the only two things the Orchestrator can observe of an Executor: that it has not
@@ -728,13 +735,17 @@ enough to rebuild it by hand.
 Independent branches of the graph keep running. The human is told which subtree stalled
 and why.
 
-**Work item is wrong.** The Executor escalates with what it found (I6). The Orchestrator
-proposes a graph amendment. **A plan amendment requires fresh human approval** — otherwise
-the approved plan and the executing plan drift apart, which is precisely the failure this
-design exists to prevent.
+**Work item is wrong.** The Executor escalates with what it found (I6) and the node is
+`blocked`. **The graph is not changed** — it was frozen when the human approved it, and a plan
+that drifts from the approved one is precisely the failure this design exists to prevent. The
+run continues with whatever else is dispatchable and ends with that node unbuilt.
 
-**Design is wrong.** Rare and expensive. The run returns to `designing`. Landed nodes stay
-landed; the amended plan accounts for them as existing state.
+**Design is wrong.** Rare and expensive, and it ends the run. Landed nodes stay landed; the
+next run plans against a codebase that already contains them.
+
+**Either way, the way forward is a new run**, not a repaired one. That keeps one approved
+graph per run and one plan the human actually agreed to — at the cost of re-planning work that
+a mid-run amendment could have patched (§12).
 
 **Conflict at landing.** Resolved by the human (§8.3). devflow neither rebases the node nor
 re-opens its confirm gate.
@@ -809,7 +820,15 @@ Surfaced to the human; the Orchestrator does not reset or merge its copy (I8).
    tracked changes only, or over a tree cleaned to a declared ignore list — when the guarantee
    matters more than the false positives.
 
-12. **Deterministic operations are done by instruction.** The MVP has no code of its own:
+12. **The graph is frozen at approval, and that has a price.** A blocked or rejected node
+   cannot be re-planned mid-run: the run ends with it unbuilt and the next run plans afresh,
+   re-deciding work the first run had already settled. The alternative — amending the graph
+   in flight — keeps momentum but reintroduces exactly the drift this design exists to
+   prevent, since the plan being executed would no longer be the plan the human approved.
+   Revisit if runs turn out to stall often enough that re-planning from scratch is the
+   dominant cost.
+
+13. **Deterministic operations are done by instruction.** The MVP has no code of its own:
    graph validation, working out which nodes are ready, cloning, the landing sequence, and
    writes to `state.json` are all performed by the Orchestrator following its skill
    (harness.md §6). That is reliable for a handful of nodes and plainly worded steps, and
