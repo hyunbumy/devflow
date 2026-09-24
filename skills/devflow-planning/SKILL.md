@@ -33,6 +33,17 @@ one codebase**:
 **The splitting test:** if a node's title needs the word "and", or a reviewer would have to
 sort its diff into categories, it is two nodes.
 
+**`files_touched` must include the test files the node will change.** New behaviour needs a
+new test, and that test lives somewhere — if the file holding it is not declared, the Executor
+must either skip the test or work outside its declared scope. Both are bad, and the second is
+worse: `files_touched` is what decides which nodes may run at the same time, so an Executor
+writing outside it can collide with a sibling.
+
+**Check what the existing tests already assert** before writing acceptance criteria. A
+criterion that contradicts a test currently in the tree gives the Executor an impossible node:
+it cannot satisfy the criterion and leave the suite untouched. If a node must change an
+existing expectation, say so in `intent` and name that file in `files_touched`.
+
 For each node write `id`, `repo`, `title`, `intent`, `depends_on`, `files_touched`,
 `acceptance` and `tests`. `intent` is what the Executor gets, so it says what changes and
 why, including any constraint that is not obvious from the code. `tests` is guidance on how
