@@ -136,8 +136,16 @@ be useless after a restart.
 
 **What the MVP relies on.** The Executor's definition and its work item both say: every file
 created or changed must be inside the scratch directory; never touch another node's worktree, the
-codebase checkout, or the project root. Commit only to your own branch — no merge, no rebase onto
-anything else, no push, no branch or ref operation on anything but `devflow/<your id>`.
+codebase checkout, `.devflow/context/`, or the project root. Commit only to your own branch — no
+merge, no rebase onto anything else, no push, no branch or ref operation on anything but
+`devflow/<your id>`.
+
+**An Executor is given no context beyond its work item** — not `.devflow/context/`, not
+`understanding.md`, not the design. Everything it needs has to be in the work item, which is why
+design.md §5.1 makes `intent` carry any constraint that is not obvious from the code, and why a
+node needing more than that is a badly planned node rather than a reason to widen what the
+Executor reads. Reference material is for the phases that decide *what* to build; by execution it
+has done its job (I9).
 
 **What that does not guarantee.** A subagent works in the Orchestrator's directory with the
 Orchestrator's reach. Nothing but instructions stops an Executor that is confused about where
@@ -207,7 +215,10 @@ rather than copying files into its `.claude/`, so every project runs the same ve
 | `agents/executor.md` | The loop above, the rules, the tool list |
 | `agents/tester.md` | How to choose what to run, and its report format |
 | `agents/reviewer.md` | The review checklist — written out in full, since `implementation.md` does not exist inside a project — and its report format |
-| `skills/devflow/SKILL.md` | The Orchestrator's phases and gates, and step-by-step procedures for validating a graph, dispatching, completing, asking for a checkpoint merge, and recovering |
+| `skills/devflow/SKILL.md` | The Orchestrator's phases and gates, and the layout and standing rules that hold in all of them |
+| `skills/devflow-exploration/SKILL.md` | The context step — proposing what the goal needs, writing `context.json`, fetching what the human approved — and then reading it |
+| `skills/devflow-planning/SKILL.md` | Decomposition, graph validation against `context.json`, and provisioning a working clone per codebase the graph names |
+| `skills/devflow-execution/SKILL.md` | Base commits, dispatch, the confirm relay, completing a node, checkpoint merges, and recovery |
 | Templates | Work item, tester report, reviewer report, completion note |
 
 ---

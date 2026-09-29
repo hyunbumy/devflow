@@ -42,7 +42,8 @@ One per project. Long-lived. The only agent that talks to the human.
 Owns: the goal, context, design, the work graph, scheduling, and run state.
 
 **Does not write production code or git history.** Its only writes are the project
-artifacts (§9), `.devflow/state.json`, each node's `work_item.md`, and provisioning Executor
+artifacts (§9), `.devflow/state.json`, each node's `work_item.md`, provisioning context and
+working clones the human has approved (§4.2, §4.4), and provisioning Executor
 directories (adding a worktree and its branch, removing them once the node is complete).
 This is the central invariant — it keeps the Orchestrator's context budget spent on
 coordination rather than implementation detail, and it means every line of production code
@@ -78,9 +79,9 @@ directory.
 
 ### Human
 
-Initializes the project: creates the project repository and populates the codebases
-(§9). Approves the goal, the design, and the plan. Reviews each node's diff at its
-confirm gate.
+Initializes the project: creates the project repository (§9). **Decides what context the run
+gets** — the Orchestrator proposes, they supply and approve (§4.2). Approves the goal, the
+design, and the plan. Reviews each node's diff at its confirm gate.
 
 **Owns everything that reaches a shared branch.** Commits the Orchestrator's artifacts in
 the project repository. In the codebases, merges node branches into the main branch at the
@@ -119,6 +120,10 @@ below follows from them.
   there. The one way the checkout advances is a fast-forward to a merge the human already made
   (§8.3). Node branches and objects accumulate in the repository behind it, which is expected
   and is not a change to the checkout.
+- **I9.** Context is read-only, never a node's target, and frozen before execution. Nothing
+  devflow runs writes to `.devflow/context/`; no node may name a reference as its `repo`; and
+  once the phase is `executing` no context is added, because by then everything it held has been
+  distilled into `understanding.md` (§4.2).
 
 ---
 
@@ -166,17 +171,111 @@ Output: `goal.md`.
 
 ### 4.2 Exploration
 
-The Orchestrator reads the relevant codebases from their checkouts under `.devflow/repos/`
-and writes down what it learned. Fan-out search agents are appropriate here; their findings
-are distilled into the document, not pasted into it.
+Two steps: establish what there is to read, then read it.
+
+#### 4.2.1 Gathering context
+
+The Orchestrator cannot explore what it has not been given, and a run built on missing context
+produces a design that is wrong in ways nobody notices until execution. So before reading
+anything it works out what the approved goal needs, proposes it, and waits for the human to
+supply it.
+
+Two kinds of thing are declared, and the distinction runs through the rest of the design:
+
+| | Working codebase | Reference |
+|---|---|---|
+| What it is for | work will happen here | read in order to understand |
+| Must be a git repository | yes | no |
+| Can be named as a node's `repo` | yes | **never** |
+| Written by devflow | later, through a node's worktree | never (I9) |
+
+**Everything declared is fetched into `.devflow/context/<name>/`, and that is what exploration
+reads** — including the codebases the work will change. Which of them actually get changed is not
+known until the graph exists, so nothing is cloned for work at this step. At plan approval the
+codebases the graph names *additionally* get a fresh working clone at `.devflow/repos/<name>/`
+(§4.4, §8.1); the context copy stays where it is and stays read-only.
+
+So a codebase that gets worked on ends up on disk twice, on purpose. §8.1 explains why: a context
+resource is whatever the human pointed at, and a base commit taken from that means nothing.
+
+**Declaring something as a codebase is checked when it is fetched.** It has to be a git
+repository, because everything downstream needs a branch and a commit. A `codebases` entry whose
+source cannot be cloned is an error to raise here, while the human is still in the conversation —
+not at plan approval, by which point a whole design has been built on it.
+
+The Orchestrator **proposes; the human decides.** It has the goal, and a codebase's README or
+dependency manifest names neighbours worth reading, so it should say what it thinks is missing
+and why. It does not choose — a run whose context an agent selected is a run that can quietly
+omit the thing that mattered. Fetching is the human's call too, since it reaches the network:
+devflow may clone or copy what the human approved, and nothing else.
+
+Output: `context.json` at the project root, committed by the human.
+
+```jsonc
+{
+  "codebases": [
+    {
+      "name": "api",
+      "source": "git@github.com:acme/api.git",
+      "what": "The service this work changes. Only these may be a node's repo."
+    }
+  ],
+  "references": [
+    {
+      "name": "billing",
+      "source": "git@github.com:acme/billing-service.git",
+      "what": "api calls this for invoicing. We must understand it and must not change it."
+    },
+    {
+      "name": "rfc-041",
+      "source": "~/docs/rfc-041-auth.md",
+      "what": "The spec the new auth flow has to match."
+    }
+  ]
+}
+```
+
+`name` is the directory under `.devflow/`. `source` records where it came from, which is what
+lets a different checkout re-provision the same context (§9). `what` is one line on what the
+thing is and why it is here — it is read by every later phase, so "the billing service" is not
+enough and "api calls this for invoicing, must not change" is.
+
+**The file is committed; the content is not.** `.devflow/` is gitignored, so the material itself
+is machine-local — but the declaration travels with the project, which is the only durable record
+of what a run was based on. Without it, a reader of `understanding.md` cannot tell whether a gap
+is an oversight or an absence.
+
+**This step is re-enterable.** Exploration frequently discovers that something else has to be
+read, and design sometimes does too; either may come back here, propose the addition, and
+continue once the human supplies it. Coming back from design means appending what the new material
+changes to `understanding.md` rather than rewriting it (§9) — the point of the append-only record
+is that a later reader can see the belief change.
+
+**A reference can be promoted to a codebase**, and this is a normal thing to happen: design
+concludes that the neighbouring service has to change after all. The human re-declares it under
+`codebases`, and it gets a working clone at plan approval like any other. It cannot go the other
+way once the graph names it. Promotion has to happen before the plan is approved, because
+validation rejects a node whose `repo` is not a declared codebase (§5.3) and the graph is frozen
+after that.
+
+What this step may not do is run during execution — see I9 and §4.5.
+
+#### 4.2.2 Reading it
+
+The Orchestrator reads the declared context and writes down what it learned. Fan-out search
+agents are appropriate here; their findings are distilled into the document, not pasted into it.
 
 Exploration is scoped by the approved goal, not exhaustive. The aim is enough context to
 design, not a map of every codebase.
 
-Output: `understanding.md` — the codebases available and what each is, architecture as
+Output: `understanding.md` — what each declared thing is and how it matters, architecture as
 it actually is, relevant conventions, constraints discovered, and **open questions**.
 Open questions are first-class; an unanswered one is a reason to talk to the human, not
 to guess.
+
+`context.json` says what was available; `understanding.md` says what it means. They are kept
+apart for the same reason `graph.json` and `plans.md` are: one is checked by machine, the other
+is read by a person.
 
 ### 4.3 Design
 
@@ -196,19 +295,34 @@ Output: `design.md`.
 The Orchestrator decomposes the approved design into a directed acyclic graph of work
 nodes. Node contract and sizing rules are in §5.
 
+Planning **consumes** context and does not add to it. A plan that cannot be written without
+something nobody declared means exploration or the design missed it, and that is a later phase
+finding an earlier output wrong — the run ends rather than quietly widening its inputs (§4).
+
 The plan is presented to the human in two forms: `plans.md` for reading, `graph.json` for
 machines. They must agree; `plans.md` is generated from `graph.json`.
 
 **Gate: the human approves the plan explicitly.** The phase advances to `executing` only
 on that approval.
 
-Output: `plans.md`, `graph.json`.
+**On approval — after validation (§5.3) passes — the working codebases are provisioned.** The
+set is read off the approved graph, being the distinct `repo` values across all its nodes, rather
+than guessed at. devflow makes a fresh clone of each into `.devflow/repos/<name>/` from the source
+`context.json` declares (§8.1). A declared codebase that no node targets is never cloned: it stays
+a reference and is read where it is.
+
+Output: `plans.md`, `graph.json`, and a working clone per codebase the graph names.
 
 ### 4.5 Execution
 
 The Orchestrator schedules ready nodes, spawns Executors, relays confirm gates to the
 human, asks for a merge at the checkpoints the graph requires, and persists state after
 every transition. Detail in §6–§8.
+
+**Context is closed.** No reference is added and none is re-read: everything they held is in
+`understanding.md` by now, and an Executor sees only its work item and its own worktree (§6). A
+belief that turns out wrong at this point is a correction to `understanding.md` and, if it
+invalidates a node, a `blocked` node — not a reason to go back and read more (I9).
 
 ### 4.6 Interaction Flow
 
@@ -221,7 +335,8 @@ End-to-end interactions across every participant in a run.
 | Explorers | Short-lived search agents fanned out during exploration |
 | Project repo | The project directory; checked-in artifacts (§9) |
 | `state.json` | Run state, in `.devflow/` |
-| Codebase | The checkout at `.devflow/repos/<repo>/` and the repository behind it, which owns every node branch and worktree |
+| Context | Read-only material under `.devflow/context/`, declared in `context.json` (§4.2) |
+| Codebase | The working clone at `.devflow/repos/<repo>/` and the repository behind it, which owns every node branch and worktree |
 | Executor | Per-node implementing agent |
 | Executor dir | The node's work item and its worktree, in `.devflow/executors/` |
 
@@ -232,6 +347,7 @@ sequenceDiagram
     participant X as Explorers
     participant P as Project repo
     participant S as state.json
+    participant K as Context
     participant C as Codebase
     participant E as Executor
     participant W as Executor dir
@@ -245,9 +361,15 @@ sequenceDiagram
     end
     O->>S: phase exploring
 
-    Note over H,W: Exploration (§4.2)
+    Note over H,W: Exploration (§4.2). The context step is re-enterable from here and from design.
+    loop until the human says that is everything
+        O->>H: propose what the goal needs
+        H-->>O: supply and approve
+        O->>K: fetch what was approved
+        O->>P: write context.json
+    end
     O->>X: scoped searches
-    X->>C: read code
+    X->>K: read context
     X-->>O: findings
     O->>P: write understanding.md
     opt open questions
@@ -269,9 +391,10 @@ sequenceDiagram
         O->>H: present plan
         H-->>O: feedback or approval
     end
+    O->>C: clone each codebase the graph names
     O->>S: phase executing, node statuses
 
-    Note over H,W: Execution (§4.5), nodes run concurrently up to the limit
+    Note over H,W: Execution (§4.5), nodes run concurrently up to the limit. Context is closed (I9).
     loop each ready node
         opt several dependencies, no branch contains them all
             O->>H: merge these branches into the main branch (§8.3)
@@ -318,7 +441,7 @@ when it changed. Each node declares:
 | Field | Purpose |
 |---|---|
 | `id` | Lowercase letters, digits and hyphens. Stable for the run, never reused even after `abandoned`; also the Executor directory name |
-| `repo` | The one codebase this node changes |
+| `repo` | The one codebase this node changes. Must be a `codebases` entry in `context.json` — never a reference (I9) |
 | `title` | One line, imperative |
 | `intent` | What changes and why, in prose. The core of the Executor's work item. |
 | `depends_on` | Node ids whose work must be committed and reachable from this node's base before it starts (§5.3) |
@@ -369,8 +492,12 @@ mentally sort the diff into categories, split it. This is the same heuristic
 ### 5.3 Graph rules
 
 - **Validated at plan approval.** The plan is rejected if the dependencies contain a cycle,
-  a dependency names an unknown id, an id is duplicated, a `repo` is not a directory in
-  `.devflow/repos/`, or a node has no acceptance criteria.
+  a dependency names an unknown id, an id is duplicated, a `repo` is not declared under
+  `codebases` in `context.json`, or a node has no acceptance criteria.
+- **`repo` is validated against the manifest, not against the disk.** Working clones do not exist
+  until the plan is approved (§4.4), so there is no directory to check. Naming a `references`
+  entry is the error this catches: reference material is read, never changed (I9), and a node
+  pointed at it could never be built.
 - `depends_on` means **every dependency is `complete`, and the commit this node branches from
   contains all of their work.** A node's worktree is created on a new branch off that commit,
   so it starts out already containing its dependencies and never re-does or conflicts with
@@ -585,8 +712,22 @@ checkpoints.
 
 ### 8.1 Worktrees and branches
 
-Each codebase is a git repository checked out at `.devflow/repos/<repo>/`. Every node of that
-codebase gets a **worktree of that same repository**, on a branch of its own, inside the
+Context and work live in separate places, and the split is the one from §4.2:
+
+```
+.devflow/
+├── context/
+│   └── <name>/            # read-only, whatever the human supplied (I9)
+├── repos/
+│   └── <repo>/            # working clone; owns every node branch and worktree below
+└── executors/
+    └── <node-id>/         # the Executor's scratch directory
+        ├── work_item.md
+        └── <repo>/        # worktree on branch devflow/<node-id>
+```
+
+Each working codebase is a git repository checked out at `.devflow/repos/<repo>/`. Every node of
+that codebase gets a **worktree of that same repository**, on a branch of its own, inside the
 node's scratch directory.
 
 Throughout this document, **the main branch** means whichever branch that checkout has checked
@@ -594,15 +735,21 @@ out. devflow never switches it (I8), so it is fixed for the run and needs no con
 also why a node branch can always be created: no worktree ever asks for the branch the checkout
 already holds.
 
-```
-.devflow/
-├── repos/
-│   └── <repo>/            # the checkout devflow reads; owns every node branch below
-└── executors/
-    └── <node-id>/         # the Executor's scratch directory
-        ├── work_item.md
-        └── <repo>/        # worktree on branch devflow/<node-id>
-```
+**The working clone is fresh, made by devflow at plan approval** (§4.4), even when the same
+codebase is already sitting under `.devflow/context/`. That duplication is deliberate. A context
+resource is whatever the human pointed at — possibly their own working copy, on a feature branch,
+with uncommitted changes — and a base commit taken from that means nothing. Cloning it gives
+devflow a known branch at a known commit, which everything downstream depends on: the base commit
+in the work item, every diff taken against it, and the merge checkpoints.
+
+The cost is a second checkout of any codebase that is both context and target. Given that
+duplicated build state is already this design's main operational tax (below), one more checkout
+is noise.
+
+The two copies never need reconciling, because they are read at different times for different
+reasons. Context is read during exploration, to understand what the codebase *is*, and is closed
+before execution begins (I9). The working clone is where work happens. Nothing reads context
+during execution, so the context copy going stale relative to landed node work costs nothing.
 
 The work item sits beside the worktree rather than inside it, so it stays out of the diff under
 review. The Executor is told the scratch directory's path and to stay inside it; for the MVP
@@ -708,14 +855,17 @@ in `.devflow/`, which is never checked in.
 <project>/                      # project repo: single branch, human commits
 ├── .gitignore                  # ignores .devflow/
 ├── goal.md                     # approved goal
-├── understanding.md            # codebases, exploration context, open questions
+├── context.json                # what was made available to read  (§4.2)
+├── understanding.md            # what it means, open questions
 ├── design.md                   # approved high-level design
 ├── plans.md                    # human-readable execution plan (generated from graph.json)
 ├── graph.json                  # the DAG — machine-readable
 └── .devflow/                   # temp, not checked in
     ├── state.json              # run phase + node statuses  (Orchestrator-owned)
+    ├── context/
+    │   └── <name>/             # read-only reference material  (I9)
     ├── repos/
-    │   └── <repo>/             # codebase checkout; owns every node branch and worktree
+    │   └── <repo>/             # working clone; owns every node branch and worktree
     └── executors/
         └── <node-id>/          # one Executor's scratch directory
             ├── work_item.md    # the node contract handed to the Executor  (Orchestrator-owned)
@@ -769,22 +919,35 @@ always `.devflow/executors/<id>/`, its worktree is `<repo>/` inside it, and its 
 which Executor is working which node, since that dies with the session (§10); and the completion
 note, for the same reason.
 
-**Initialization.** The human creates the project repository and populates
-`.devflow/repos/` with every codebase the project needs — directly, or from a list of
-codebases checked in to the project repository. devflow does not choose or fetch
-codebases on its own.
+**Initialization.** The human creates the project repository, and that is all that is needed to
+start. Context arrives during exploration's first step, not up front (§4.2): the Orchestrator
+proposes what the approved goal needs and the human supplies it, which is how `context.json` and
+`.devflow/context/` come to exist. Working clones under `.devflow/repos/` arrive later still, at
+plan approval (§4.4).
+
+devflow never **chooses** context — an agent that selects its own inputs can quietly omit the
+thing that mattered. It may **fetch** what the human approved, which is just running a clone they
+asked for, and it confirms before doing so because that reaches the network.
 
 `understanding.md` is **append-only with dated entries**. Context discovered during
-exploration is often invalidated during execution. Corrections reach the Orchestrator from
-the human, or from its own reading of the codebase checkout — not from Executors,
-which only report completion (§7.1). The Orchestrator appends them rather than rewriting
-history, so a resumed run can see that a belief changed and when.
+exploration is often invalidated later. Corrections reach the Orchestrator from the human, and
+from what it notices while relaying confirm gates — a completion note that says something
+unexpected, or a node blocked because a belief turned out wrong. They do not come from re-reading
+context, which is closed once execution begins (I9), nor from Executors, which only report
+completion (§7.1).
+
+That makes the append-only record the *only* trace of a belief changing: nothing re-derives it
+from code later. So the Orchestrator appends rather than rewriting, and a resumed run can see both
+what was believed and when it stopped being true.
 
 Because `.devflow/` is not checked in, **execution state is local to one machine**. The
-checked-in artifacts travel with the project repository; `state.json`, work items, and
-worktrees do not. Node branches are the exception now that work is committed: they live in the
-codebase, so pushing them makes completed nodes available elsewhere even though the run cannot
-resume there. See §12.
+checked-in artifacts travel with the project repository; `state.json`, work items, worktrees and
+the context material itself do not.
+
+Two things soften that. Node branches live in the codebase repository, so pushing them makes
+completed work available elsewhere. And `context.json` is committed even though the material it
+names is not, so another checkout can re-provision the same context from the same sources instead
+of the list dying with the directory. Neither lets a run *resume* elsewhere. See §12.
 
 ---
 
@@ -998,8 +1161,10 @@ is dispatchable.
    tester chooses what to run. A project with its own review or testing skill installed should be
    able to point devflow at it rather than accept devflow's.
 
-   **Codebase provisioning** is the third: today the human populates `.devflow/repos/` by hand
-   (§9) and devflow refuses to guess.
+   **How context is fetched** is the third. §4.2 settles *what* is declared and *who* decides,
+   and leaves the mechanism at files on disk. A project whose context lives in a wiki, a ticket
+   system or a docs site would want those fetched and refreshed rather than copied in by hand —
+   which is the same propose-approve-fetch shape, with a different fetcher per source type.
 
    What makes this hard is not the mechanism — a config file naming a skill or a command per seam
    is easy. It is deciding **what a plugin may not do.** devflow's entire value is that the gates
