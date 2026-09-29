@@ -431,9 +431,9 @@ or a reviewer. Two things depend on it:
 - **Each stage becomes durable.** A replacement Executor after a crash reads `git log` and
   sees how far the work got, rather than inferring it from a working tree (§10).
 - **The commit identifies what was checked.** The tester and the reviewer are each told which
-  commit they are looking at and each name it in their report. The Orchestrator compares both
-  against the branch tip before it presents anything to the human, so an edit made after
-  review is caught rather than assumed away (§7.2).
+  commit they are looking at and each name it in their report. The Orchestrator compares each
+  one's *content* against the branch tip before it presents anything to the human, so an edit
+  made after review is caught rather than assumed away (§7.2).
 
 ### implementation
 The Executor makes the change described by the work item, plus the tests that verify it, and
@@ -552,15 +552,23 @@ needs no special handling for files the node added, and nothing the human does a
 alters it.
 
 **The diff shown is provably the diff that was tested and reviewed.** The tester and the
-reviewer each name the commit they examined (§6); the Orchestrator checks both against the
-branch tip before presenting, and sends the node back if either disagrees. Two things are
-covered by the one check: the tests ran on this code, and nothing was edited after review.
+reviewer each name the commit they examined (§6). For each, the Orchestrator runs
+`git diff --quiet <that commit> HEAD` and sends the node back if it reports a difference. Two
+things are covered by the one check: the tests ran on this code, and nothing was edited after
+review.
+
+**The comparison is of content, not of commit identity**, and it has to be: the Executor squashes
+its branch before reporting (§6), so the commit the reviewer saw no longer exists by the time the
+Orchestrator looks. A squash rewrites history without changing a single file, so the content
+comparison passes; an edit changes files, so it does not. Comparing the hashes themselves would
+fail on every node.
 
 This is the guarantee an earlier draft of the design tried to get from a content hash over the
 working tree and had to abandon, because a `.pyc` a test run regenerated moved the hash and
-bounced an innocent node (§12, item 11). A commit hash cannot move that way. What remains
-uncovered is a test run that modifies a *tracked* file, which leaves the commit alone but
-dirties the tree — the tester reports that separately, and it counts as a failure.
+bounced an innocent node (§12, item 11). Comparing committed trees cannot misfire that way,
+because an untracked file is in neither side of the comparison. What remains uncovered is a test
+run that modifies a *tracked* file, which leaves the committed content alone but dirties the
+tree — the tester reports that separately, and it counts as a failure.
 
 **Approval means the diff is accepted, nothing more.** The commit already exists on the node's
 branch, so there is no landing for the human to perform and no window between approving and
@@ -938,11 +946,11 @@ is dispatchable.
    and the node was bounced for it. Excluding generated files needed a general rule for what
    counts as generated, which was the hard part.
 
-   Committing each stage (§6) dissolves it without needing that rule. `git commit` records
-   tracked content, so a generated file cannot move the hash — the exact false positive that
-   killed the previous attempt is structurally impossible. The tester and reviewer each name the
-   commit they examined; the Orchestrator compares both to the branch tip before presenting
-   (§7.2).
+   Committing each stage (§6) dissolves it without needing that rule. A commit records tracked
+   content only, so a generated file is in neither side of a comparison between two commits — the
+   exact false positive that killed the previous attempt is structurally impossible. The tester
+   and reviewer each name the commit they examined, and the Orchestrator compares its content
+   against the branch tip with `git diff --quiet` (§7.2).
 
    **What is still uncovered:** a test run that modifies a file already tracked — a checked-in
    fixture rewritten in place. The commit is unaffected, so the comparison passes. The tester's

@@ -103,12 +103,14 @@ which recovery handles (§5).
 **Completion** — the Orchestrator, when the Executor's final message arrives: record Executor
 `done`, then present the diff and the completion note to the human.
 
-Before presenting, the Orchestrator checks the commit the tester named and the commit the
-reviewer named both equal the branch tip. If either disagrees, something was edited after it was
-checked and the node goes back. This is what an earlier draft tried to get from hashing the diff,
-which misfired on generated files (design.md §12, item 11); a commit hash cannot. It still reads
-the completion note and sends a node back when the tests it names do not match what the node
-needed.
+Before presenting, the Orchestrator runs `git diff --quiet <commit> HEAD` for the commit the
+tester named and again for the commit the reviewer named. A difference means something was edited
+after it was checked, and the node goes back. The comparison is of content rather than commit
+identity because the Executor squashes before reporting — a squash changes the commit and no
+files, so it passes, while an edit does not. This is what an earlier draft tried to get from
+hashing the working tree, which misfired on generated files (design.md §12, item 11); comparing
+two commits cannot. The Orchestrator still reads the completion note and sends a node back when
+the tests it names do not match what the node needed.
 
 **Revision.** The Orchestrator records Executor `working` and sends the human's feedback to the
 same Executor as a message. It resumes with its context intact and goes round the loop again,
@@ -183,7 +185,7 @@ pruning any worktree whose node is `complete`.
 |---|---|
 | The reviewer cannot change code | Its tool list — **enforced** |
 | Tests are run by an agent other than the implementer | The loop structure — the Executor must start a tester to get a result |
-| What the human sees is what was tested and reviewed | The tester and reviewer each name the commit they checked; the Orchestrator compares both to the branch tip — **checkable**, and immune to generated files (design.md §7.2) |
+| What the human sees is what was tested and reviewed | The tester and reviewer each name the commit they checked; the Orchestrator runs `git diff --quiet` against the branch tip for each — **checkable**, survives the squash, and immune to generated files (design.md §7.2) |
 | The tester changes nothing | Its instructions; it reports a dirty tree, which is what catches a run that rewrote a tracked file without moving the commit |
 | The tester's choice of tests is sound | Its instructions; its report lists the exact commands, and a retest must cover at least the previous round's |
 | The Executor does not skip a stage or invent a report | Its instructions; the completion note must carry both reports' results, which makes a skip visible |

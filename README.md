@@ -1,9 +1,10 @@
 # devflow
 
-A Claude Code plugin for taking a change from "here's what I want" to landed code, through a
-graph of pieces small enough that you can actually review each one.
+A Claude Code plugin for taking a change from "here's what I want" to reviewed branches ready to
+merge, through a graph of pieces small enough that you can actually review each one.
 
-You approve four things and review every diff. Nothing is committed on your behalf, ever.
+You approve four things and review every diff. Each approved node arrives as one commit on its own
+branch; nothing reaches a shared branch unless you merge it yourself.
 
 ## How a run goes
 
@@ -68,20 +69,38 @@ my-project/                    # you commit everything here
 ├── plans.md                   # the same graph, readable
 └── .devflow/                  # never committed
     ├── state.json             # the run's phase and each node's status
-    ├── repos/<name>/          # your codebase copies — read-only to the run
-    └── executors/<node>/      # one directory per node: its work item and its clone
+    ├── repos/<name>/          # your codebase checkout; holds every node branch
+    └── executors/<node>/      # one directory per node: its work item and its worktree
 ```
+
+Each node gets a worktree of your codebase on its own branch, `devflow/<node>`. The worktree is
+removed once the node is done; **the branch stays** — that is the work.
+
+Your checkout's own branch never moves unless you move it. The run only ever fast-forwards it to
+pick up a merge you already made.
 
 ## Your part
 
-**Every commit is yours.** No agent commits, merges, rebases or pushes, in any repository.
+**Every merge is yours.** Agents commit to their own node branch and nothing else — no merging,
+no rebasing, no pushing, no pull requests, in any repository.
 
 When a node is ready you get its diff and the Executor's note — what the tester ran, what the
-reviewer said. You review it, commit it in the node's clone, land it into your codebase copy,
-and tell Claude **approved**, **revise** with feedback, or **reject**. On approved it checks
-the change really landed before marking the node done.
+reviewer said. You review it and tell Claude **approved**, **revise** with feedback, or
+**reject**. There is nothing to commit: the work is already a single commit on the node's branch,
+and approving it just marks the node done.
 
-Nodes whose dependencies have landed run in parallel, up to three at a time, so other work
+Before it shows you anything, it checks that the files are unchanged since the tester tested them
+and the reviewer reviewed them, and sends the node back if they are not.
+
+**You merge at two points.** When a node depends on several others whose branches have diverged,
+there is no single commit to build on, so Claude asks you to merge those branches into your main
+branch before it continues — however you like, including a pull request or a stack of them. And at
+the end of the run, for whatever branches are left. Claude lists them in dependency order.
+
+A chain of nodes needs no merging along the way: each one branches off the one before, so work
+keeps moving while you review.
+
+Nodes whose dependencies are done run in parallel, up to three at a time, so other work
 continues while you review.
 
 ## What this does not do
