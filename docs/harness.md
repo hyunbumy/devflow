@@ -16,8 +16,8 @@ agent definitions, a skill, and templates — plus `git`.
 | Agent | Runs as | Tools | Job |
 |---|---|---|---|
 | Orchestrator | The human's interactive session, in the project directory, following the `devflow` skill | All | The run: goal, design, graph, scheduling, state, confirm relay, worktrees |
-| Executor | A subagent, one per node | Read, Edit, Write, Bash, Agent | Implement the node; start a tester and a reviewer for those stages |
-| Tester | A subagent of the Executor, new for every test stage | Read, Bash | Run the tests, report what ran and what happened |
+| Executor | A subagent, one per node | Read, Edit, Write, Bash, Grep, Glob, Agent | Implement the node; start a tester and a reviewer for those stages |
+| Tester | A subagent of the Executor, new for every test stage | Read, Bash, Grep, Glob | Run the tests, report what ran and what happened |
 | Reviewer | A subagent of the Executor, new for every review stage | Read, Grep, Glob | Review the diff, report findings |
 
 **Tool lists are enforced by Claude Code.** An agent cannot call a tool its definition does not

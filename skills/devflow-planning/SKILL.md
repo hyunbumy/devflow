@@ -57,6 +57,26 @@ to verify, not an exact command — the tester chooses what to run.
 Dependencies are for work that genuinely cannot start first, not for a preferred order. Every
 dependency you add costs parallelism and delays the human's review of everything downstream.
 
+**The shape of the dependencies has its own cost.** Each node is built on a branch, and
+where dependencies form a chain — `b` after `a`, `c` after `b` — each node branches straight
+off the one before. Nothing has to be merged for work to keep moving, and the human is never
+interrupted.
+
+Where they fork and rejoin — `d` after both `b` and `c`, which ran in parallel — the two
+branches have diverged and no commit contains both. Execution stops and asks the human to
+merge them into the main branch before `d` can start.
+
+So a join is a real interruption, and you are choosing between two costs:
+
+- **A chain** gives up the parallelism between `b` and `c`. They run one after the other.
+- **A fork that rejoins** keeps that parallelism and spends one human merge to get it.
+
+Prefer the chain when the nodes are small enough that running them in sequence costs little —
+the human's review time is the run's real bottleneck, not the machine's. Prefer the fork when
+the two halves are substantial and genuinely independent. What you must not do is invent a
+dependency that is not real just to avoid a join: a false dependency is wrong in the graph
+forever, while a join costs one merge once.
+
 ### 2. Check it
 
 Check your own graph before showing it to anyone, and fix what you find. Any of these is a
@@ -71,11 +91,15 @@ fault:
   something. "Auth works" is not a criterion; "an expired token yields 401" is.
 - **A node with no test guidance.**
 
-Two more are softer, but fix them too:
+Three more are softer, but fix them too:
 
 - **A title needing the word "and"** usually means two nodes.
 - **A node with no `files_touched`** cannot be scheduled beside its siblings safely, so it
   will run alone.
+- **Every node with two or more dependencies is a stop.** Count them — that is how many times
+  execution will pause for the human to merge. If a chain would serve as well, use the chain.
+  A node whose dependencies happen to form a chain already is not a stop, even though it lists
+  several: one of those branches already contains the others.
 
 ### 3. Show them what it means
 
@@ -85,8 +109,12 @@ it so the two cannot disagree:
 ```markdown
 # Plan
 
-<n> nodes across <m> codebases. Waves below are what can run at the same time, assuming
-each wave lands before the next starts.
+<n> nodes across <m> codebases, with <k> merge checkpoints.
+
+Waves below are what can run at the same time. Work flows from one wave to the next without
+anything being merged — each node branches off the branch it depends on. The exceptions are
+marked **checkpoint**: those depend on several branches that have diverged, so you will be
+asked to merge before they start.
 
 ## Wave 1 — no dependencies
 
@@ -96,12 +124,14 @@ each wave lands before the next starts.
 - Tests: <test guidance>
 
 ## Wave 2 — after <ids>
+
+### <id> — <title>  (`<repo>`)  — **checkpoint: merge <branches> first**
 ...
 ```
 
 Then tell the human what they are approving: how many nodes, how deep the chain is, which
-nodes can run together, and any judgement call you made while splitting the work that they
-might disagree with.
+nodes can run together, **how many times they will be asked to merge and at which nodes**, and
+any judgement call you made while splitting the work that they might disagree with.
 
 ### 4. Get approval, then hand over
 

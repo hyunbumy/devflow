@@ -978,3 +978,35 @@ is dispatchable.
    `git merge-base`, it is easy to get subtly wrong, and getting it wrong means an Executor
    silently building on a base that lacks a dependency. It is also what item 1's branch-damage
    problem would need brokered anyway (harness.md §7 D).
+
+14. **Nothing is pluggable, and several things want to be.** Every policy devflow applies is
+   written into its own skills and agent definitions, which is why the MVP works at all — one
+   file, one version, nothing to configure. But three of those policies are really the project's
+   choice, not devflow's, and a project that disagrees currently has to fork the plugin.
+
+   **The merge step** (§8.3) is the clearest. devflow asks the human to merge and then verifies;
+   it deliberately knows nothing about *how*. A project using stacked pull requests would want
+   `gt submit` and `gt sync` run at the checkpoint instead of a prompt — and Graphite's model fits
+   the graph unusually well, since a branch there has exactly one parent, which is precisely why
+   a join has to stop and a chain does not. A project on plain GitHub would want `gh pr create`.
+   Neither belongs in devflow itself. Plain git is the floor, and requiring a particular tool
+   would narrow who can use this at all.
+
+   **The review checklist** is embedded in `agents/reviewer.md` because `implementation.md` does
+   not exist inside an arbitrary project (harness.md §6). So devflow ships its own copy of a
+   policy many projects already have written down, and the two drift. The same is true of how the
+   tester chooses what to run. A project with its own review or testing skill installed should be
+   able to point devflow at it rather than accept devflow's.
+
+   **Codebase provisioning** is the third: today the human populates `.devflow/repos/` by hand
+   (§9) and devflow refuses to guess.
+
+   What makes this hard is not the mechanism — a config file naming a skill or a command per seam
+   is easy. It is deciding **what a plugin may not do.** devflow's entire value is that the gates
+   are fixed: a node is tested by an agent that did not write it, reviewed by an agent that cannot
+   edit it, and seen by a human before it counts. A plugin that could replace the review step with
+   one that always says `clean`, or the merge step with one that pushes to the main branch
+   unattended, would hollow that out while still calling itself devflow. So the contract has to
+   name the seams narrowly and say which invariants a plugin cannot reach — I1–I8 are the obvious
+   floor. Design that before designing the config format.
+
