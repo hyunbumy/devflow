@@ -17,8 +17,12 @@ work: you start a tester and a reviewer for those, fresh each time. Their agent 
 ## Rules
 
 - **Stay inside your scratch directory.** Every file you create or change must be under it.
-  Never touch another node's directory, the checkout under `.devflow/repos/`, or the project
-  root.
+  Never touch another node's directory, the checkout under `.devflow/repos/`, anything under
+  `.devflow/context/`, or the project root.
+- **Your work item is all the context you get.** You are not given the project's
+  `understanding.md`, its design, or the reference material under `.devflow/context/`. If the
+  work item does not tell you enough to do the node, that is a badly planned node — stop and say
+  so rather than going looking.
 - **Commit to your own branch, and touch no other.** Your worktree shares one git repository
   with every other node, so `git` reaches their branches too. Never merge, rebase, push, or run
   any branch, tag or ref command on anything but your own branch. If a git command names a

@@ -23,8 +23,19 @@ a draft of your own: revise it rather than starting over.
 
 ### 1. Decompose the design into nodes
 
-Read `design.md` if the project has one; otherwise work from what the human tells you. Then
-split the work so that **every node is reviewable, verifiable, incremental and confined to
+Read `design.md` if the project has one; otherwise work from what the human tells you. Read
+`context.json` too — its `codebases` list is the only thing a node's `repo` may name.
+
+**You consume context; you do not add to it.** If the design cannot be decomposed without
+something nobody declared, that is exploration or the design having missed it. Say so and stop.
+A plan that quietly widens its own inputs is the drift this whole design exists to prevent.
+
+The exception is a **reference that has to become a working codebase** — the design turns out
+to change the neighbouring service after all. That is not new context but a reclassification
+of something already declared, and it has to happen before you ask for approval: invoke
+`devflow-exploration` to re-declare it under `codebases`, then carry on.
+
+Then split the work so that **every node is reviewable, verifiable, incremental and confined to
 one codebase**:
 
 - **Reviewable** — one person can hold the whole diff in their head. Past roughly 400 changed
@@ -86,7 +97,10 @@ fault:
   all already set aside. If any nodes are left over, they are the cycle — name them.
 - **A dependency on an id that does not exist.**
 - **A duplicated id**, or an id that is not lowercase letters, digits and hyphens.
-- **A `repo` with no matching directory** in `.devflow/repos/`.
+- **A `repo` that is not a `codebases` entry in `context.json`.** Check the manifest, not the
+  disk — working clones do not exist yet; you create them at approval. A node pointing at a
+  `references` entry is the error this catches, and it is fatal: reference material is read,
+  never changed, so that node could never be built.
 - **A node with no acceptance criteria**, or with none that can be checked by running
   something. "Auth works" is not a criterion; "an expired token yields 401" is.
 - **A node with no test guidance.**
@@ -137,9 +151,28 @@ any judgement call you made while splitting the work that they might disagree wi
 
 Only on their explicit approval — not "looks good", an actual yes:
 
-1. Write `state.json`: `phase: "executing"`, and an entry for every node in the graph. A node
+1. **Provision a working clone for each codebase the graph names.** The set is the distinct
+   `repo` values across all nodes — read it off the approved graph, do not decide it. For each,
+   clone from the `source` that `context.json` declares:
+
+   ```sh
+   git clone <source> <project>/.devflow/repos/<name>
+   ```
+
+   **A fresh clone, even though the same codebase is already under `.devflow/context/`.** The
+   context copy is whatever the human pointed at — possibly their own working copy, on a
+   feature branch, with uncommitted changes — and a base commit from that means nothing.
+   Execution needs a known branch at a known commit. Leave the context copy alone; it stays
+   read-only.
+
+   A declared codebase that no node targets is **not** cloned. It stays a reference.
+
+   If a clone fails, stop and tell the human. Do not write `executing` with a codebase missing:
+   every node targeting it would fail at dispatch.
+
+2. Write `state.json`: `phase: "executing"`, and an entry for every node in the graph. A node
    whose dependencies are all `complete` starts `ready`; every other node starts `pending`.
-2. Say the run is ready, and invoke the `devflow-execution` skill.
+3. Say the run is ready, and invoke the `devflow-execution` skill.
 
 From here the statuses are execution's: it moves nodes through `running`, `complete`,
 `blocked` and `abandoned` as work happens. You do not touch them again.

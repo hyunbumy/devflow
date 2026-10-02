@@ -29,6 +29,13 @@ A design is finished when it answers all of these:
 Where the design rests on something you could not settle during exploration, say so in the
 document rather than deciding quietly.
 
+**If you need context nobody gathered, go and get it.** Designing often reveals that the service
+on the other side of an interface, or a spec the change has to match, should have been read.
+Invoke `devflow-exploration` — its first step adds context — and append what you learn to
+`understanding.md`. This is also where a reference becomes a working codebase, if the design
+concludes that something declared read-only has to change after all. Do it now: once the plan is
+approved the graph is frozen, and a node cannot name a codebase that was never declared.
+
 If designing shows the approved goal to be wrong, stop and say so. The goal is frozen; this run
 ends and the next one starts from a goal that fits what you now know. Do not design for a goal
 the human did not approve.

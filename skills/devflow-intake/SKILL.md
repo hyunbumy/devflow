@@ -66,8 +66,10 @@ you should start exploring.
 
 On approval:
 
-1. Write `state.json` with `phase: "exploring"` and no nodes yet, creating the file if this
-   is a new run.
-2. Tell them exploration is starting, and invoke the `devflow-exploration` skill.
+1. Write `.devflow/state.json` with `phase: "exploring"` and no nodes yet, creating
+   `.devflow/` and the file if this is a new run. Nothing else needs provisioning — exploration
+   asks the human for the context the goal needs, so there is nothing to set up here.
+2. Tell them exploration starts by agreeing what context the run gets, and invoke the
+   `devflow-exploration` skill.
 
 The human commits `goal.md` when they choose; you never commit anything.

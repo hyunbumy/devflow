@@ -18,10 +18,19 @@ know where the run stands, hand off to the right phase, and hold the rules that 
 **The project is your working directory.** Everywhere below, `<project>` means that
 directory; nobody needs to tell you which one it is.
 
-Check it is a devflow project: a `.devflow/` directory with a codebase checkout in
-`.devflow/repos/`. If it is missing, say so and stop — do not create it, and do not guess at
-another directory. At the start of a run `.devflow/` holds only the checkouts the human
-put there — `state.json`, `goal.md`, `design.md` and `graph.json` are all produced by the run.
+Check it is a devflow project: a git repository whose root is where you are, with a `.devflow/`
+directory.
+
+**If `.devflow/` is missing, this is either the very start of a run or the wrong directory**, and
+nothing on disk tells you which. So ask before creating anything: say you are about to start a
+new run here, name the directory, and wait. A project directory is one of its own — it holds the
+run's documents, not the code being changed — so a request made from inside a codebase is almost
+certainly in the wrong place. Never guess at another directory.
+
+**Everything else is produced by the run**, in this order: `goal.md` at intake; `context.json`
+and `.devflow/context/` when exploration gathers context; `understanding.md`; `design.md`;
+`graph.json` and `plans.md`; then a working clone per codebase the graph names, at plan approval.
+Nothing has to be set up in advance.
 
 Then pick up wherever the run stands and tell the human. A bare invocation with no
 instruction means "carry on from where this run is".
@@ -54,16 +63,23 @@ The layout and rules below hold in every phase, whichever one you are in.
 
 ```
 <project>/                     # the human commits everything here
+├── context.json               # what was made available to read
 ├── graph.json                 # the work graph
 └── .devflow/                  # never committed
     ├── state.json             # phase + node statuses (you are the only writer)
-    ├── repos/<repo>/          # the codebase checkout; owns every node branch and worktree
+    ├── context/<name>/        # read-only material; never written, never a node's target
+    ├── repos/<repo>/          # working clone; owns every node branch and worktree
     └── executors/<node-id>/
         ├── work_item.md       # what you hand the Executor
         └── <repo>/            # that node's worktree (removed once the node is complete)
 ```
 
-Each node works on its own branch, `devflow/<node-id>`, in a worktree of the checkout above. The
+**Context and working clones are different things.** `context/` is what the run reads in order
+to understand; it is supplied by the human, read-only, and closed once execution begins.
+`repos/` is where work happens, cloned fresh at plan approval for only the codebases the graph
+names. A codebase that is both ends up in both, on purpose.
+
+Each node works on its own branch, `devflow/<node-id>`, in a worktree of the working clone. The
 branch is the node's output and **outlives its worktree** — removing the worktree keeps the
 branch, and the branch is what dependents build on and what the human eventually merges.
 
@@ -89,6 +105,10 @@ branch, and the branch is what dependents build on and what the human eventually
 - **Write state before the action it authorises.** A crash must never leave state claiming
   less than reality.
 - **Never edit a worktree.** Implementation belongs to Executors, always.
+- **Never write to `.devflow/context/`**, and never let a node target something declared there.
+  Context is read, never changed.
+- **Never choose context.** Propose it and let the human decide; fetch only what they approved,
+  and tell them first, because it reaches the network.
 - **Never merge, rebase, push or open a pull request**, in any repository. Executors commit to
   their own branches; everything that reaches a shared branch is the human's own act.
 - **Never change a codebase checkout.** Do not edit it, switch its branch, or commit in it. The
