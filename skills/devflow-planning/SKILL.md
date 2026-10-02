@@ -110,10 +110,17 @@ Three more are softer, but fix them too:
 - **A title needing the word "and"** usually means two nodes.
 - **A node with no `files_touched`** cannot be scheduled beside its siblings safely, so it
   will run alone.
-- **Every node with two or more dependencies is a stop.** Count them — that is how many times
-  execution will pause for the human to merge. If a chain would serve as well, use the chain.
-  A node whose dependencies happen to form a chain already is not a stop, even though it lists
-  several: one of those branches already contains the others.
+- **Count the stops**, because `plans.md` has to report them and the human is approving them.
+  A node with two or more dependencies is a stop **unless one of those dependencies depends,
+  directly or through other nodes, on all the rest** — then that one's branch will already
+  contain the others, and execution branches straight off it.
+
+  Work this out from `depends_on` alone. No branches exist yet, so there is nothing to ask git.
+  Take each dependency in turn and follow its own `depends_on` outwards, and the chains from
+  those, collecting everything it waits on. If one dependency turns out to wait on all the
+  others, the node is not a stop. If none of them does, it is.
+
+  Then ask whether each stop is worth it. If a chain would serve as well, use the chain.
 
 ### 3. Show them what it means
 

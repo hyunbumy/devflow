@@ -596,9 +596,10 @@ The Executor **squashes its branch to a single commit** — the node is one logi
 result, the reviewer's result, and the commit. It cannot reach the human itself; the
 Orchestrator relays (§7).
 
-The message is the Executor's to write and is not part of what the human approves. A node
-branch is disposable, so a poor message costs a rewrite rather than a bad entry in shared
-history, and the human can improve it when they merge.
+The message is the Executor's to write and is not part of what the human approves. At this point
+the branch is still disposable — nothing is built on it and it has not been approved — so a poor
+message costs a rewrite rather than a bad entry in shared history, and the human can improve it
+when they merge.
 
 On revision feedback it re-enters `implementation` with that feedback, as many times as the
 human wants, squashing again each time it comes back round. Rewriting the branch is safe
@@ -827,11 +828,13 @@ a pull request (I7); it only ever asks, and then checks.
 **Verifying a checkpoint.** Before dispatching the node that was waiting, the Orchestrator
 confirms the merge really happened:
 
-1. If the checkout has an upstream, `git pull --ff-only` in `.devflow/repos/<repo>/`, so a
-   merge made through a remote is visible locally. If there is no upstream, the human merged
-   locally and there is nothing to pull. If it cannot fast-forward, stop and surface it and never
-   resolve the divergence — a fast-forward to the human's own merge is the only checkout change
-   I8 allows.
+1. `git pull --ff-only` in `.devflow/repos/<repo>/`, so a merge made through a remote becomes
+   visible locally. The working clone is always made from a source (§4.4), so it always has an
+   upstream, and the Orchestrator does not need to know which way the human merged: a pull
+   request arrives through this pull, and a merge made locally in the clone leaves the branch
+   already ahead, so the pull is a no-op. Step 2 is the proof either way. If it cannot
+   fast-forward, stop and surface it and never resolve the divergence — a fast-forward to the
+   human's own merge is the only checkout change I8 allows.
 2. For each dependency, check its branch is reachable:
    `git merge-base --is-ancestor devflow/<dep> <main branch>`.
 
@@ -957,9 +960,10 @@ The Orchestrator is stateless between sessions; `state.json` is the sole source 
 On start it reads the project and `.devflow/` and reconstructs.
 
 **A subagent that was in flight when the session died is gone, but its branch survives**, and
-the branch is the work. Nothing has to be reconstructed: a replacement Executor reads
-`git log` against the base commit and sees which stages were committed — implementation, a test
-fix, a review fix — then continues from there. It loses the dead Executor's reasoning, not its
+the branch is the work — provided the repository holding it does, which §11 covers. Nothing has
+to be reconstructed: a replacement Executor reads `git log` against the base commit and sees
+which stages were committed — implementation, a test fix, a review fix — then continues from
+there. It loses the dead Executor's reasoning, not its
 output, so recovery can be blunt. Committing each stage (§6) is what makes the record this
 precise; an uncommitted working tree said only that *something* had been done.
 
@@ -1025,6 +1029,15 @@ is not reachable from the main branch (§8.3). Surfaced to the human; the Orches
 reset, merge, or resolve divergence itself (I8), and does not dispatch the waiting node until
 the human accounts for it.
 
+**The working clone is gone.** Every node branch for that codebase lived inside it, so they went
+too. If no node for it was `complete`, nothing is lost: it is re-cloned from the `source` in
+`context.json` and any in-flight node starts over. If something *was* `complete`, that approved
+work is gone unless the human had pushed the branch, and the run stops there rather than
+re-cloning — a fresh clone looks healthy while silently missing landed work, and every dependent
+would then be built on a base that lacks it. This is the one place where `.devflow/` being
+disposable is not true: the branches are the run's only copy of approved work until the human
+merges or pushes them (§12, item 5).
+
 **The human never merges a checkpoint.** The waiting node stays `ready` and the run makes no
 further progress down that part of the graph. Nothing times out and nothing is merged on the
 human's behalf; the Orchestrator says what it is waiting for and keeps running whatever else
@@ -1069,10 +1082,15 @@ is dispatchable.
    (§8.1) only needs to stay below the benefit at that small scale.
 
 5. **Execution state is machine-local** (§9). The artifacts are checked in, but
-   `.devflow/` is not, so a run cannot resume execution from a different checkout. Node branches
-   are the one part of the operational state that is now portable — they live in the codebase
-   repository, so pushing them carries completed work to another machine even though the run
-   itself cannot follow.
+   `.devflow/` is not, so a run cannot resume execution from a different checkout.
+
+   Node branches are *pushable* but not, by themselves, portable: they live in the working clone
+   at `.devflow/repos/<name>/`, which is inside the gitignored directory. Pushing one carries
+   completed work to another machine; until someone does, that branch is the only copy of an
+   approved node's work. So deleting `.devflow/` is not the harmless cleanup it was when node
+   output was an uncommitted working tree — §11 covers what happens when the clone goes missing.
+   Whether devflow should push approved branches to keep them safe, rather than leaving every
+   copy inside a gitignored directory, is the open half of item 7.
 
 6. **Nested orchestration** — whether an Executor may ever spawn sub-Executors to split its
    work — is deliberately excluded. It breaks I4 and makes the state machine substantially
@@ -1082,12 +1100,22 @@ is dispatchable.
 
 7. **Resolved: agents commit, on node branches only.** This was open as "whether to later let
    agents land clean, approved nodes". The answer taken is narrower than that and arrives
-   earlier: the Executor commits its own work as it goes and squashes before it reports (§6),
-   because a node branch is disposable and a bad commit there costs a rewrite. Merging anything
-   into a shared branch stays the human's (I7). What remains open is the second half of the
-   original question — whether a node's tests should be re-run after the human resolves a
-   conflict while merging. Today nothing does, and a conflict resolved wrongly at a checkpoint
-   is caught only by whatever the human runs themselves.
+   earlier: the Executor commits its own work as it goes and squashes before it reports (§6).
+   That is safe because a branch is disposable *until the node is approved* — a bad commit costs
+   a rewrite, and nothing is built on it yet. Merging anything into a shared branch stays the
+   human's (I7).
+
+   Two things remain open:
+
+   - **Re-running tests after a conflict.** Nothing re-runs a node's tests once the human has
+     resolved a conflict while merging, so a resolution that breaks the node is caught only by
+     whatever they run themselves.
+   - **Whether devflow should push an approved branch.** After approval the branch stops being
+     disposable: it is the only copy of work the human already signed off, and it sits in a
+     gitignored directory (item 5, §11). Pushing it would make it durable, but pushing is an
+     outward-facing act this design deliberately keeps out of agents' hands, and it needs a
+     remote and a naming convention devflow does not currently assume. Until then, the answer
+     is that the human merges promptly.
 
 8. **One run per project.** A project with a follow-up goal after `done` would need run
    identifiers in the layout (§9) and in `state.json`. Not designed until needed.

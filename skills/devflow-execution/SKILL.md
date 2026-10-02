@@ -16,7 +16,8 @@ approved it; a run that needs a different graph is a run that has to end.
 
 1. Read `graph.json` and `.devflow/state.json`. If `state.json` will not parse, stop and ask
    the human — do not guess it back into shape.
-2. **See what is actually on disk before you restart anything.** For each codebase:
+2. **See what is actually on disk before you restart anything.** For each distinct `repo` the
+   graph names — those are the only ones that were cloned (planning provisions from the graph):
 
    ```sh
    git -C <project>/.devflow/repos/<repo> worktree prune   # drop registrations for gone directories
@@ -27,6 +28,18 @@ approved it; a run that needs a different graph is a run that has to end.
    Now you know which nodes have a live worktree and which have a branch. A `running` node with no
    worktree cannot have an Executor started into it — say so rather than guessing, and check
    whether its branch still holds the work before deciding anything.
+
+   **If `.devflow/repos/<repo>` is gone altogether**, every node branch for that codebase went
+   with it, because they lived in that repository. How bad that is depends on what had finished:
+
+   - **No node for it is `complete`** — nothing is lost. Re-clone it from the `source` in
+     `context.json`, exactly as planning would have, and carry on. Any `running` node for it
+     starts over from its work item.
+   - **Some node for it is `complete`** — that approved work is gone unless the human pushed the
+     branch somewhere. **Stop and tell them**, naming which nodes are affected. Do not re-clone:
+     a fresh clone would look healthy while silently missing landed work, and every dependent
+     would then be built on a base that lacks it. Recovering a pushed branch is theirs to do; if
+     it was never pushed, the work is gone and the run cannot honestly continue past it.
 
 3. Act on what each entry says:
 
@@ -88,15 +101,18 @@ yourself, and never dispatch a node onto a base that is missing a dependency.
 
 **When they say they have merged**, verify before dispatching:
 
-1. If the checkout tracks an upstream, pull so a merge made through a remote is visible:
+1. Pull, so that a merge made through a remote becomes visible locally:
 
    ```sh
-   git -C <project>/.devflow/repos/<repo> rev-parse --abbrev-ref --symbolic-full-name @{u}
    git -C <project>/.devflow/repos/<repo> pull --ff-only
    ```
 
-   No upstream means they merged locally and there is nothing to pull. If it will not
-   fast-forward, stop and tell the human — never reset or merge it yourself.
+   The clone was made from the source `context.json` declares, so it always has an upstream. You
+   do not know which way they merged and you do not need to: if they used a pull request this
+   brings it in, and if they merged locally in this clone the local branch is already ahead and
+   the pull reports "already up to date". Either way step 2 is what proves it.
+
+   If it will not fast-forward, stop and tell the human — never reset or merge it yourself.
 
 2. Check each dependency is reachable from `main`:
 

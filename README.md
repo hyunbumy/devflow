@@ -82,6 +82,10 @@ my-project/                    # you commit everything here
 record of what the run was based on, so it travels with the project. The repos and documents
 themselves stay local.
 
+**Don't delete `.devflow/` mid-run.** It is gitignored, but the working clone inside it holds
+every finished node's branch — and until you merge or push them, that is the only copy of work
+you already approved.
+
 **Context is read-only and read-once.** Nothing in `.devflow/context/` is ever written to, and
 no work node can target it. By the time execution starts, everything it held has been distilled
 into `understanding.md` — so context is closed, and nothing goes back to re-read it.
